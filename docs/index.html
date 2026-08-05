@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Subsurface — a 2D physics puzzle about carving a path for fluid</title>
+    <meta
+      name="description"
+      content="Subsurface is a mobile physics puzzle game: carve pathways through reactive geological layers to guide a volume of viscous fluid down to a collector crystal. Design specification and pre-production mockups."
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2317130f'/%3E%3Crect y='6' width='32' height='9' fill='%238c4a32'/%3E%3Crect y='15' width='32' height='7' fill='%23c9a26b'/%3E%3Crect x='13' y='2' width='6' height='24' fill='%232fd4c4'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <!-- ==================================================================
+         Shared mockup geometry. Every illustration on this page is drawn
+         from this one cross-section so the before/after comparison is a
+         like-for-like view of the same level.
+         ================================================================== -->
+    <svg
+      width="0"
+      height="0"
+      aria-hidden="true"
+      focusable="false"
+      style="position: absolute"
+    >
+      <defs>
+        <linearGradient id="fluidGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#4fe6d8" />
+          <stop offset="55%" stop-color="#2fd4c4" />
+          <stop offset="100%" stop-color="#17a99c" />
+        </linearGradient>
+
+        <linearGradient id="crystalGrad" x1="0" y1="0" x2="0.4" y2="1">
+          <stop offset="0%" stop-color="#fff7cf" />
+          <stop offset="100%" stop-color="#e0cd7c" />
+        </linearGradient>
+
+        <linearGradient id="bezel" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#332b24" />
+          <stop offset="100%" stop-color="#181410" />
+        </linearGradient>
+
+        <pattern
+          id="grit"
+          width="7"
+          height="7"
+          patternUnits="userSpaceOnUse"
+          patternTransform="rotate(12)"
+        >
+          <circle cx="1.5" cy="1.5" r="0.9" fill="#8a6a3f" opacity="0.5" />
+          <circle cx="5" cy="4.5" r="0.7" fill="#efd9a8" opacity="0.4" />
+        </pattern>
+
+        <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="5" result="b" />
+          <feMerge>
+            <feMergeNode in="b" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+
+        <clipPath id="screenClip">
+          <rect x="0" y="0" width="320" height="640" rx="4" />
+        </clipPath>
+
+        <!-- Wet sand can only exist inside the sand band. -->
+        <clipPath id="sandBand">
+          <rect x="14" y="300" width="292" height="92" />
+        </clipPath>
+
+        <!-- The undisturbed level: bedrock shell, strata, collector, drains. -->
+        <g id="strata">
+          <rect width="320" height="640" fill="#3a3a42" />
+          <rect x="14" y="34" width="292" height="572" fill="#17130f" />
+
+          <!-- clay seal beneath the reservoir: the player's first cut -->
+          <rect x="14" y="190" width="292" height="36" fill="#95523a" />
+          <rect x="14" y="226" width="292" height="74" fill="#83452c" />
+
+          <!-- permeable sand band -->
+          <rect x="14" y="300" width="292" height="92" fill="#c9a26b" />
+          <rect
+            x="14"
+            y="300"
+            width="292"
+            height="92"
+            fill="url(#grit)"
+            opacity="0.55"
+          />
+
+          <!-- lower clay body -->
+          <rect x="14" y="392" width="292" height="128" fill="#8c4a32" />
+
+          <!-- dry sand pockets suspended in the clay -->
+          <ellipse cx="72" cy="440" rx="30" ry="17" fill="#c1985f" />
+          <ellipse
+            cx="72"
+            cy="440"
+            rx="30"
+            ry="17"
+            fill="url(#grit)"
+            opacity="0.5"
+          />
+          <ellipse cx="244" cy="418" rx="24" ry="13" fill="#c1985f" />
+          <ellipse
+            cx="244"
+            cy="418"
+            rx="24"
+            ry="13"
+            fill="url(#grit)"
+            opacity="0.5"
+          />
+
+          <!-- fractured rock: shatters into rigid chunks rather than vanishing -->
+          <g>
+            <polygon points="132,398 168,402 176,428 148,438 126,420" fill="#5a6b78" />
+            <polygon points="132,398 168,402 152,416 126,420" fill="#6b7d8a" />
+            <polygon points="176,430 208,424 220,448 190,456" fill="#54646f" />
+            <polygon points="176,430 208,424 196,440" fill="#687985" />
+            <polygon points="96,462 128,456 138,478 104,484" fill="#5a6b78" />
+            <polygon points="96,462 128,456 114,470" fill="#6b7d8a" />
+          </g>
+
+          <!-- indestructible bedrock ribs forcing a centre line -->
+          <rect x="14" y="468" width="106" height="26" fill="#3a3a42" />
+          <rect x="200" y="468" width="106" height="26" fill="#3a3a42" />
+          <rect x="14" y="468" width="106" height="4" fill="#4a4a54" />
+          <rect x="200" y="468" width="106" height="4" fill="#4a4a54" />
+
+          <!-- strata striations -->
+          <g stroke="#2a1409" stroke-width="1" opacity="0.16">
+            <line x1="14" y1="208" x2="306" y2="208" />
+            <line x1="14" y1="246" x2="306" y2="246" />
+            <line x1="14" y1="272" x2="306" y2="272" />
+            <line x1="14" y1="410" x2="306" y2="410" />
+            <line x1="14" y1="444" x2="306" y2="444" />
+            <line x1="14" y1="502" x2="306" y2="502" />
+          </g>
+
+          <!-- cavern floor, collector trough, and two drains -->
+          <rect x="14" y="596" width="292" height="10" fill="#3a3a42" />
+          <rect x="110" y="566" width="14" height="40" fill="#3a3a42" />
+          <rect x="196" y="566" width="14" height="40" fill="#3a3a42" />
+          <rect x="30" y="596" width="26" height="10" fill="#0c0a08" />
+          <rect x="264" y="596" width="26" height="10" fill="#0c0a08" />
+
+          <!-- collector crystal -->
+          <g>
+            <rect x="124" y="572" width="72" height="34" fill="#2a2418" />
+            <polygon points="128,606 140,574 152,606" fill="url(#crystalGrad)" />
+            <polygon points="146,606 160,568 174,606" fill="url(#crystalGrad)" />
+            <polygon points="168,606 180,576 192,606" fill="url(#crystalGrad)" />
+            <polygon points="140,574 146,606 128,606" fill="#c9b667" opacity="0.55" />
+            <polygon points="160,568 168,606 146,606" fill="#c9b667" opacity="0.45" />
+          </g>
+        </g>
+      </defs>
+    </svg>
+
+    <!-- ================================ header ======================== -->
+    <header>
+      <div class="wrap">
+        <span class="pill">Pre-production</span>
+        <h1 class="title">Subsurface</h1>
+        <p class="tagline">
+          A 2D physics puzzle where you carve pathways through reactive
+          geological layers to guide a volume of viscous fluid down to a
+          collector crystal.
+        </p>
+        <div class="header-links">
+          <a class="btn btn-primary" href="#in-action">See it in action</a>
+          <a
+            class="btn"
+            href="https://github.com/CoderCoop/SubSurface/blob/main/docs/design-spec.md"
+            >Design specification</a
+          >
+          <a class="btn" href="https://github.com/CoderCoop/SubSurface"
+            >Repository</a
+          >
+        </div>
+      </div>
+    </header>
+
+    <div class="wrap">
+      <div class="notice">
+        <strong>Mockups</strong>
+        <span
+          >No build of Subsurface exists yet. Every image on this page is an
+          illustration of the intended design, not a screenshot of running
+          software, and the readouts in them are invented values. They will be
+          replaced with real captures once there is something to capture.</span
+        >
+      </div>
+    </div>
+
+    <!-- ================================ what ========================== -->
+    <section id="what">
+      <div class="wrap">
+        <p class="eyebrow">What it is</p>
+        <h2>A pathfinding puzzle, played by removing earth</h2>
+        <p class="lede">
+          You are a subterranean pathfinder. Each level begins with a volume of
+          fluid sealed in a chamber near the surface and a collector crystal
+          buried somewhere below it. Between the two sits a cross-section of
+          ground: watertight clay, loose sand that collapses when you cut into
+          it, and slabs of bedrock you cannot touch.
+        </p>
+        <p class="lede">
+          Your only verb is digging — one finger, one continuous swipe, material
+          removed along the path. There is no undo and no way to put earth back.
+          A channel cut in the wrong place is a permanent feature of the level,
+          which is what makes the digging a decision rather than a chore.
+        </p>
+
+        <div class="cols">
+          <div class="card">
+            <h3>The fluid is the physics</h3>
+            <p>
+              It conserves its volume, pools against watertight layers, and
+              builds pressure in deep vertical columns — which is what drives it
+              hard through narrow gaps at the bottom of a shaft.
+            </p>
+          </div>
+          <div class="card">
+            <h3>The ground reacts</h3>
+            <p>
+              Terrain is not collision data. Sand slumps to its angle of repose
+              and drinks the fluid; fractured rock shatters into chunks that can
+              block the passage you just opened.
+            </p>
+          </div>
+          <div class="card">
+            <h3>You set the pace</h3>
+            <p>
+              The simulation runs in real time, but nothing hurries you. The
+              tension comes from what the fluid is already doing while you
+              decide where to cut next.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== in action ======================= -->
+    <section id="in-action">
+      <div class="wrap">
+        <p class="eyebrow">In action</p>
+        <h2>Mid-level, partway down</h2>
+        <p class="lede">
+          The intended play screen: portrait cross-section, minimal instrument
+          HUD, fluid working its way down a channel that has just broken through
+          the sand band.
+        </p>
+
+        <figure class="hero-figure">
+          <svg
+            viewBox="0 0 720 730"
+            role="img"
+            aria-label="Mockup of the Subsurface play screen: a portrait cross-section of ground with a teal fluid reservoir at the top, a carved channel running down through clay and sand, and a collector crystal at the bottom."
+          >
+            <!-- device -->
+            <rect
+              x="188"
+              y="28"
+              width="344"
+              height="664"
+              rx="36"
+              fill="url(#bezel)"
+              stroke="#3f352c"
+            />
+
+            <g transform="translate(200,40)">
+              <g clip-path="url(#screenClip)">
+                <use href="#strata" />
+
+                <!-- reservoir, partly drained; a pool spreads wall to wall -->
+                <rect x="14" y="120" width="292" height="70" fill="url(#fluidGrad)" />
+                <rect x="14" y="120" width="292" height="3" fill="#7ff2e6" opacity="0.7" />
+
+                <!-- wet sand: darkened halo where fluid has soaked outward -->
+                <g clip-path="url(#sandBand)">
+                  <path
+                    d="M160 296 C 154 330, 166 360, 160 396"
+                    stroke="#7c5e3c"
+                    stroke-width="62"
+                    fill="none"
+                    opacity="0.85"
+                  />
+                </g>
+                <!-- carved channel, broken through the sand band -->
+                <path
+                  d="M160 194 C 150 250, 172 300, 158 350 S 150 400, 160 452"
+                  stroke="#17130f"
+                  stroke-width="30"
+                  stroke-linecap="round"
+                  fill="none"
+                />
+                <!-- fluid in the channel -->
+                <path
+                  d="M160 184 C 150 250, 172 300, 158 350 S 150 400, 160 448"
+                  stroke="url(#fluidGrad)"
+                  stroke-width="21"
+                  stroke-linecap="round"
+                  fill="none"
+                />
+                <circle cx="163" cy="470" r="7" fill="#2fd4c4" opacity="0.85" />
+                <circle cx="157" cy="492" r="4.5" fill="#2fd4c4" opacity="0.6" />
+
+                <!-- HUD (spec §3.1: minimal, technical, lab-instrument) -->
+                <g>
+                  <rect
+                    x="22"
+                    y="46"
+                    width="276"
+                    height="42"
+                    rx="5"
+                    fill="#0f0d0b"
+                    opacity="0.82"
+                  />
+                  <g
+                    font-family="ui-monospace, Menlo, monospace"
+                    font-size="8"
+                    letter-spacing="1.6"
+                    fill="#7d6e5c"
+                  >
+                    <text x="36" y="62">DEPTH</text>
+                    <text x="128" y="62">PRESSURE</text>
+                    <text x="226" y="62">COLLECTED</text>
+                  </g>
+                  <g
+                    font-family="ui-monospace, Menlo, monospace"
+                    font-size="14"
+                    fill="#ece3d8"
+                  >
+                    <text x="36" y="79">38.4 m</text>
+                    <text x="128" y="79">2.1 kPa</text>
+                    <text x="226" y="79" fill="#2fd4c4">34%</text>
+                  </g>
+                  <rect x="22" y="92" width="276" height="3" rx="1.5" fill="#2a2419" />
+                  <rect x="22" y="92" width="94" height="3" rx="1.5" fill="#2fd4c4" />
+                  <rect x="256" y="90" width="1.5" height="7" fill="#c9a26b" />
+                </g>
+
+                <!-- swipe trail -->
+                <path
+                  d="M160 194 C 150 250, 172 300, 158 350 S 150 400, 160 452"
+                  stroke="#ffffff"
+                  stroke-width="1.5"
+                  stroke-dasharray="3 6"
+                  opacity="0.28"
+                  fill="none"
+                />
+                <circle cx="160" cy="452" r="15" fill="none" stroke="#ffffff" opacity="0.3" />
+                <circle cx="160" cy="452" r="4" fill="#ffffff" opacity="0.5" />
+              </g>
+              <rect
+                x="0"
+                y="0"
+                width="320"
+                height="640"
+                rx="4"
+                fill="none"
+                stroke="#000"
+                opacity="0.5"
+              />
+            </g>
+
+            <!-- annotations -->
+            <g
+              font-family="ui-monospace, Menlo, monospace"
+              font-size="11"
+              fill="#a89880"
+              stroke="none"
+            >
+              <g stroke="#4a3f34" stroke-width="1" fill="none">
+                <path d="M176 102 H 226" />
+                <path d="M176 196 H 240" />
+                <path d="M544 258 H 486" />
+                <path d="M544 386 H 470" />
+                <path d="M176 494 H 356" />
+                <path d="M544 622 H 400" />
+              </g>
+              <g fill="#c9a26b" stroke="none">
+                <circle cx="226" cy="102" r="2.5" />
+                <circle cx="240" cy="196" r="2.5" />
+                <circle cx="486" cy="258" r="2.5" />
+                <circle cx="470" cy="386" r="2.5" />
+                <circle cx="356" cy="494" r="2.5" />
+                <circle cx="400" cy="622" r="2.5" />
+              </g>
+
+              <text x="168" y="99" text-anchor="end">Instrument HUD —</text>
+              <text x="168" y="113" text-anchor="end">depth, pressure,</text>
+              <text x="168" y="127" text-anchor="end">collection</text>
+
+              <text x="168" y="187" text-anchor="end">Reservoir — a fixed</text>
+              <text x="168" y="201" text-anchor="end">volume, conserved</text>
+              <text x="168" y="215" text-anchor="end">wherever it goes</text>
+
+              <text x="552" y="249">Clay seal — watertight,</text>
+              <text x="552" y="263">and the first cut</text>
+              <text x="552" y="277">every level asks for</text>
+
+              <text x="552" y="377">Sand band — permeable.</text>
+              <text x="552" y="391">Fluid soaks outward and</text>
+              <text x="552" y="405">darkens it into wet sand</text>
+
+              <text x="168" y="485" text-anchor="end">Carved channel —</text>
+              <text x="168" y="499" text-anchor="end">one continuous swipe,</text>
+              <text x="168" y="513" text-anchor="end">not undoable</text>
+
+              <text x="552" y="613">Collector crystal —</text>
+              <text x="552" y="627">85% of the volume</text>
+              <text x="552" y="641">has to arrive here</text>
+            </g>
+          </svg>
+          <figcaption>
+            <span class="mock-tag">Mockup</span>Illustration of the intended play
+            screen. Not a screenshot — the depth, pressure and collection figures
+            are invented, and no build exists that could produce them.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ============================== before/after ==================== -->
+    <section id="before-after">
+      <div class="wrap">
+        <p class="eyebrow">Before / after</p>
+        <h2>What the digging actually changes</h2>
+        <p class="lede">
+          The same level, same fluid volume, same layers — shown with and
+          without the player's intervention. Left is the level as it loads.
+          Right is the level after one considered channel, cut down the centre
+          between the bedrock ribs and landing inside the collector trough.
+        </p>
+
+        <div class="compare">
+          <figure>
+            <h3>Before — untouched</h3>
+            <svg
+              viewBox="0 0 320 640"
+              role="img"
+              aria-label="Mockup of the level before digging: fluid sits sealed in the upper chamber above an unbroken clay layer, and the collector crystal at the bottom is empty."
+            >
+              <g clip-path="url(#screenClip)">
+                <use href="#strata" />
+                <!-- full reservoir resting on an unbroken seal -->
+                <rect x="14" y="70" width="292" height="120" fill="url(#fluidGrad)" />
+                <rect x="14" y="70" width="292" height="3" fill="#7ff2e6" opacity="0.7" />
+
+                <g
+                  font-family="ui-monospace, Menlo, monospace"
+                  font-size="11"
+                  fill="#7d6e5c"
+                >
+                  <text x="24" y="52">COLLECTED</text>
+                  <text x="296" y="52" text-anchor="end" fill="#d98b6a">0%</text>
+                </g>
+                <rect x="22" y="58" width="276" height="3" rx="1.5" fill="#2a2419" />
+              </g>
+            </svg>
+            <p class="outcome">
+              <span class="bad">FAIL — 0% collected.</span> The clay is
+              watertight, so the payload never leaves the chamber. Nothing about
+              the level resolves itself without a cut.
+            </p>
+          </figure>
+
+          <figure>
+            <h3>After — one channel cut</h3>
+            <svg
+              viewBox="0 0 320 640"
+              role="img"
+              aria-label="Mockup of the same level after digging: a channel runs from the chamber down through the clay and sand into the collector, which is full of glowing fluid."
+            >
+              <g clip-path="url(#screenClip)">
+                <use href="#strata" />
+                <!-- reservoir nearly drained -->
+                <rect x="14" y="176" width="292" height="14" fill="url(#fluidGrad)" opacity="0.9" />
+
+                <!-- wet-sand halo: the volume this run lost to absorption -->
+                <g clip-path="url(#sandBand)">
+                  <path
+                    d="M160 296 C 156 330, 164 360, 160 396"
+                    stroke="#7c5e3c"
+                    stroke-width="70"
+                    fill="none"
+                    opacity="0.9"
+                  />
+                </g>
+                <!-- the carved channel -->
+                <path
+                  d="M160 190 C 152 260, 170 330, 158 410 S 152 520, 160 596"
+                  stroke="#17130f"
+                  stroke-width="30"
+                  stroke-linecap="round"
+                  fill="none"
+                />
+                <path
+                  d="M160 186 C 152 260, 170 330, 158 410 S 152 520, 160 596"
+                  stroke="url(#fluidGrad)"
+                  stroke-width="21"
+                  stroke-linecap="round"
+                  fill="none"
+                />
+                <!-- collector, filled and lit -->
+                <g filter="url(#glow)">
+                  <rect x="124" y="566" width="72" height="40" fill="#2fd4c4" opacity="0.5" />
+                </g>
+                <rect x="124" y="566" width="72" height="40" fill="url(#fluidGrad)" opacity="0.75" />
+                <rect x="124" y="566" width="72" height="2.5" fill="#9df6ec" />
+
+                <g
+                  font-family="ui-monospace, Menlo, monospace"
+                  font-size="11"
+                  fill="#7d6e5c"
+                >
+                  <text x="24" y="52">COLLECTED</text>
+                  <text x="296" y="52" text-anchor="end" fill="#2fd4c4">92%</text>
+                </g>
+                <rect x="22" y="58" width="276" height="3" rx="1.5" fill="#2a2419" />
+                <rect x="22" y="58" width="254" height="3" rx="1.5" fill="#2fd4c4" />
+              </g>
+            </svg>
+            <p class="outcome">
+              <span class="good">CLEAR — 92% collected.</span> The remaining 8%
+              is the wet-sand halo: the fluid the permeable band drank on the way
+              down. Cut wider and you lose more of it to the sand; cut off-centre
+              and the cavern floor sends the rest to the drains.
+            </p>
+          </figure>
+        </div>
+        <figcaption>
+          <span class="mock-tag">Mockup</span>Both panels are illustrations of
+          intended behaviour drawn from the same cross-section. The percentages
+          are chosen to show the design's intent, not measured from a
+          simulation.
+        </figcaption>
+      </div>
+    </section>
+
+    <!-- ============================== materials ======================= -->
+    <section id="materials">
+      <div class="wrap">
+        <p class="eyebrow">Ground</p>
+        <h2>Four materials, each with two behaviours</h2>
+        <p class="lede">
+          Every layer answers two separate questions: what happens when the dig
+          tool passes through it, and what happens when the fluid reaches it.
+          The puzzles come from those answers disagreeing.
+        </p>
+
+        <div class="materials">
+          <div class="mat">
+            <svg viewBox="0 0 232 120" role="img" aria-label="Bedrock: a solid grey slab that the dig tool cannot penetrate.">
+              <rect width="232" height="120" fill="#3a3a42" />
+              <g stroke="#2c2c33" stroke-width="2" opacity="0.8">
+                <path d="M0 34 H232 M0 76 H232 M62 0 V34 M150 34 V76 M96 76 V120" />
+              </g>
+              <rect y="0" width="232" height="4" fill="#4a4a54" opacity="0.7" />
+              <g stroke="#ece3d8" stroke-width="2.5" opacity="0.55" fill="none">
+                <path d="M150 44 L 178 72 M178 44 L 150 72" />
+              </g>
+            </svg>
+            <div class="mat-body">
+              <h3>Bedrock</h3>
+              <dl>
+                <dt>Dig</dt>
+                <dd>Indestructible. Defines the level boundary and its ribs.</dd>
+                <dt>Fluid</dt>
+                <dd>Impermeable. Nothing passes, ever.</dd>
+              </dl>
+            </div>
+          </div>
+
+          <div class="mat">
+            <svg viewBox="0 0 232 120" role="img" aria-label="Clay: reddish-brown layers with teal fluid pooling perfectly on top.">
+              <rect width="232" height="120" fill="#8c4a32" />
+              <rect y="0" width="232" height="46" fill="#17130f" />
+              <g stroke="#2a1409" stroke-width="1.5" opacity="0.25">
+                <path d="M0 62 H232 M0 84 H232 M0 104 H232" />
+              </g>
+              <rect x="0" y="26" width="232" height="20" fill="url(#fluidGrad)" />
+              <rect x="0" y="26" width="232" height="3" fill="#9df6ec" opacity="0.65" />
+            </svg>
+            <div class="mat-body">
+              <h3>Clay / silt</h3>
+              <dl>
+                <dt>Dig</dt>
+                <dd>Cuts smoothly and cleanly. The workhorse material.</dd>
+                <dt>Fluid</dt>
+                <dd>Watertight. Fluid pools against it with a flat surface.</dd>
+              </dl>
+            </div>
+          </div>
+
+          <div class="mat">
+            <svg viewBox="0 0 232 120" role="img" aria-label="Sand: tan grains slumped into a slope, darkening to wet sand where fluid has soaked in.">
+              <rect width="232" height="120" fill="#17130f" />
+              <path d="M0 120 V54 Q 60 44 116 74 Q 172 104 232 96 V120 Z" fill="#c9a26b" />
+              <path
+                d="M0 120 V54 Q 60 44 116 74 Q 172 104 232 96 V120 Z"
+                fill="url(#grit)"
+                opacity="0.6"
+              />
+              <path d="M92 62 Q 116 70 138 88 Q 150 120 108 120 Q 78 100 92 62 Z" fill="#7c5e3c" />
+              <g opacity="0.9">
+                <rect x="110" y="18" width="9" height="42" rx="4" fill="url(#fluidGrad)" />
+                <circle cx="114" cy="66" r="4.5" fill="#2fd4c4" />
+              </g>
+              <g stroke="#8a6a3f" stroke-width="1" opacity="0.5" fill="none">
+                <path d="M16 66 Q 60 56 92 66" />
+              </g>
+            </svg>
+            <div class="mat-body">
+              <h3>Sand / gravel</h3>
+              <dl>
+                <dt>Dig</dt>
+                <dd>
+                  Unstable. Cut into it and the sand above collapses to its angle
+                  of repose, reshaping the passage you made.
+                </dd>
+                <dt>Fluid</dt>
+                <dd>
+                  Permeable. Fluid seeps in and turns it to wet sand — darker,
+                  heavier, more cohesive — and that volume is off the board.
+                </dd>
+              </dl>
+            </div>
+          </div>
+
+          <div class="mat">
+            <svg viewBox="0 0 232 120" role="img" aria-label="Fractured rock: jagged blue-grey slabs breaking apart into loose chunks.">
+              <rect width="232" height="120" fill="#17130f" />
+              <g>
+                <polygon points="0,44 54,36 72,86 26,104 0,88" fill="#5a6b78" />
+                <polygon points="0,44 54,36 30,64 0,66" fill="#6b7d8a" />
+                <polygon points="80,30 140,40 132,92 84,80" fill="#54646f" />
+                <polygon points="80,30 140,40 104,58" fill="#6b7d8a" />
+                <polygon points="150,52 200,44 218,84 168,98" fill="#5a6b78" />
+                <polygon points="150,52 200,44 176,70" fill="#6b7d8a" />
+                <polygon points="120,96 158,104 146,120 112,118" fill="#47555f" />
+              </g>
+              <!-- fracture lines running between the separating chunks -->
+              <g stroke="#17130f" stroke-width="2.5" opacity="0.7" fill="none">
+                <path d="M76 32 L 72 88 M144 36 L 150 96 M76 32 L 148 34" />
+              </g>
+            </svg>
+            <div class="mat-body">
+              <h3>Fractured rock</h3>
+              <dl>
+                <dt>Dig</dt>
+                <dd>
+                  Shatters instead of vanishing, leaving rigid chunks that fall
+                  and settle wherever gravity puts them.
+                </dd>
+                <dt>Fluid</dt>
+                <dd>
+                  Chunks plug narrow passages and get shoved around by pressure —
+                  usable as a valve, or a problem you made for yourself.
+                </dd>
+              </dl>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== architecture ==================== -->
+    <section id="how">
+      <div class="wrap">
+        <p class="eyebrow">How it is meant to work</p>
+        <h2>A hybrid simulation, not a polygon physics engine</h2>
+        <p class="lede">
+          Sand that slumps, fluid that conserves volume, and rock that breaks
+          into rigid bodies do not come from one solver. The specification pairs
+          two.
+        </p>
+
+        <div class="cols">
+          <div class="card">
+            <h3>Cellular grid</h3>
+            <p>
+              The playfield is a dense 2D grid; each cell carries a material
+              type, velocity, mass and wetness. This is the falling-sand
+              approach, and it is what makes thousands of interacting sand, clay
+              and fluid cells affordable.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Rigid bodies on top</h3>
+            <p>
+              A conventional 2D physics engine handles the fractured-rock chunks.
+              The two layers exchange forces: the grid pushes buoyancy and
+              pressure into the bodies, and the bodies mask out grid cells.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Only simulate what moves</h3>
+            <p>
+              The level is split into chunks, and chunks with nothing moving in
+              them sleep. Resting sand and untouched clay cost nothing per frame.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Built to parallelise</h3>
+            <p>
+              Grid updates are dispatched to worker threads or compute shaders,
+              with an ECS keeping particle data separate from the systems that
+              act on it — the shape that keeps this viable on a phone.
+            </p>
+          </div>
+        </div>
+
+        <p style="margin-top: 32px">
+          Levels are authored as PNGs, with hex values mapping to starting cell
+          states — <code>#FF0000</code> clay, <code>#00FF00</code> sand,
+          <code>#0000FF</code> fluid spawner, <code>#FFFFFF</code> collector — so
+          a level is data a designer can paint rather than code.
+          <a
+            href="https://github.com/CoderCoop/SubSurface/blob/main/docs/design-spec.md"
+            >Full specification →</a
+          >
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================== getting started ================= -->
+    <section id="start">
+      <div class="wrap">
+        <p class="eyebrow">Getting started</p>
+        <h2>How to use this, per environment</h2>
+        <p class="lede">
+          What you can do with Subsurface today depends entirely on where you're
+          trying to do it, and the differences are worth stating plainly.
+        </p>
+
+        <div class="env">
+          <div class="env-head">
+            <h3>Read the specification</h3>
+            <span class="env-state ready">Available</span>
+          </div>
+          <p>
+            The design document is the project's source of truth: mechanics,
+            material behaviours, simulation architecture, level format and
+            progression. Nothing to install — read it
+            <a
+              href="https://github.com/CoderCoop/SubSurface/blob/main/docs/design-spec.md"
+              >rendered on GitHub</a
+            >, or open <code>docs/design-spec.md</code> in a checkout.
+          </p>
+        </div>
+
+        <div class="env">
+          <div class="env-head">
+            <h3>Run this website locally</h3>
+            <span class="env-state ready">Available</span>
+          </div>
+          <pre><code><span class="c"># clone and open — no build step, no dependencies</span>
+git clone https://github.com/CoderCoop/SubSurface.git
+cd SubSurface
+
+open docs/index.html        <span class="c"># macOS</span>
+xdg-open docs/index.html    <span class="c"># Linux</span>
+start docs\index.html       <span class="c"># Windows</span></code></pre>
+          <p class="why">
+            <b>Why this one differs:</b> the site is plain HTML and CSS with no
+            generator, no bundler and no network calls, so a browser can open it
+            straight off the filesystem. You would only need a local server
+            (<code>python3 -m http.server -d docs</code>) if the site later
+            starts using ES modules or fetching level data — both of which
+            browsers block on <code>file://</code> origins under CORS, even
+            though the files sit right there.
+          </p>
+        </div>
+
+        <div class="env">
+          <div class="env-head">
+            <h3>Play the game on a phone</h3>
+            <span class="env-state blocked">Not available</span>
+          </div>
+          <p>
+            There is no iOS or Android build, no TestFlight or internal-testing
+            track, and no store listing. This page will not link to one until a
+            build exists.
+          </p>
+          <p class="why">
+            <b>Why this one differs:</b> the two sections above only need files
+            in a repository, and this one needs an engine. The specification
+            calls for a cellular-automata grid paired with a rigid-body layer and
+            driven off worker threads or compute shaders — none of which is
+            written yet. The gap here is implementation, not packaging, so there
+            is no shortcut that would produce something playable sooner.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== status ========================== -->
+    <section id="status">
+      <div class="wrap">
+        <p class="eyebrow">Status</p>
+        <h2>What exists, and what doesn't</h2>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Area</th>
+                <th scope="col">State</th>
+                <th scope="col">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Design specification</td>
+                <td><span class="st done">Written</span></td>
+                <td>Mechanics, materials, architecture, level format, progression.</td>
+              </tr>
+              <tr>
+                <td>Project website</td>
+                <td><span class="st done">Written</span></td>
+                <td>This page. Illustrated with mockups until a build exists.</td>
+              </tr>
+              <tr>
+                <td>Cellular grid (fluid, sand, clay)</td>
+                <td><span class="st todo">Not started</span></td>
+                <td>The core simulation. Everything playable depends on it.</td>
+              </tr>
+              <tr>
+                <td>Rigid-body layer (fractured rock)</td>
+                <td><span class="st todo">Not started</span></td>
+                <td>Needs the grid first, plus the force-exchange layer between them.</td>
+              </tr>
+              <tr>
+                <td>PNG level loader</td>
+                <td><span class="st todo">Not started</span></td>
+                <td>Hex-to-material mapping described in the spec.</td>
+              </tr>
+              <tr>
+                <td>Audio &amp; haptics</td>
+                <td><span class="st todo">Not started</span></td>
+                <td>ASMR-leaning digging and flow; pressure rumble, fracture taps.</td>
+              </tr>
+              <tr>
+                <td>Volume conservation vs. absorption</td>
+                <td><span class="st open">Open question</span></td>
+                <td>
+                  The spec asks for strictly conserved volume, but also has sand
+                  absorbing fluid and lists absorption as a fail state. Either wet
+                  sand holds the fluid (conserved but immobilised) or absorption
+                  destroys it — the choice changes how the 85% threshold is
+                  computed and needs settling before the grid is built.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="wrap">
+        <p>
+          Subsurface — design specification and pre-production site.
+          <a href="https://github.com/CoderCoop/SubSurface">CoderCoop/SubSurface</a>
+        </p>
+        <p>
+          All illustrations on this page are mockups of intended design, not
+          captures of running software.
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>
