@@ -84,7 +84,24 @@ behave. No shipping build exists for any platform.
 
 ## Licence
 
-[MIT](LICENSE). Subsurface is open source, and any future engine choice is
-expected to keep it that way — worth noting when that decision comes up, since
-it rules some engines in and others out. The one dependency,
-[planck](https://piqnt.com/planck.js/), is MIT as well.
+[CC0 1.0 Universal](LICENSE) — a public domain dedication. Subsurface waives its
+copyright worldwide, so you can use, modify and redistribute any of it for any
+purpose, commercial included, without attribution or permission.
+
+Two things worth knowing about CC0 specifically, since it is a dedication rather
+than a software licence:
+
+- **It is not OSI-approved.** CC0 reserves patent rights explicitly (§4a), which
+  is why the Open Source Initiative never certified it and why some
+  organisations' policies decline CC0-covered code. The Free Software Foundation
+  does consider it a free software licence. If that becomes a problem for a
+  contributor or a distributor, the fix is a relicence, which is easy while the
+  contributor list is short and hard afterwards.
+- **It covers this repository only.** The one dependency,
+  [planck](https://piqnt.com/planck.js/), is MIT and stays MIT — CC0 here does
+  not place it in the public domain, and anything redistributing planck still
+  carries its notice.
+
+Subsurface is intended to stay open regardless of what happens to the engine
+question above, which is worth remembering when that call comes up: it rules
+some engines in and others out.
