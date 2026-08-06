@@ -189,10 +189,12 @@
       <div class="notice">
         <strong>Mockups</strong>
         <span
-          >No build of Subsurface exists yet. Every image on this page is an
-          illustration of the intended design, not a screenshot of running
-          software, and the readouts in them are invented values. They will be
-          replaced with real captures once there is something to capture.</span
+          >Every image on this page is an illustration of the intended design,
+          not a screenshot, and the readouts in them are invented values. There
+          is no game build to capture. A working prototype of the simulation
+          <em>does</em> now exist and runs in a browser —
+          <a href="#start">how to run it</a> — but it is a bare development
+          harness, not the game these mockups depict.</span
         >
       </div>
     </div>
@@ -781,6 +783,31 @@ start docs\index.html       <span class="c"># Windows</span></code></pre>
 
         <div class="env">
           <div class="env-head">
+            <h3>Run the simulation prototype</h3>
+            <span class="env-state ready">Available</span>
+          </div>
+          <pre><code><span class="c"># the grid simulation, playable in a browser</span>
+open src/index.html         <span class="c"># or xdg-open / start</span>
+
+<span class="c"># and the test suite (Node 18+, no dependencies)</span>
+node --test test/sim.test.js</code></pre>
+          <p>
+            Drag to dig. Clay cuts clean and holds fluid; sand collapses into
+            whatever you cut and drinks what runs through it, giving it back
+            only under pressure. Get 85% of the payload into the crystal.
+          </p>
+          <p class="why">
+            <b>Why this one differs:</b> like the site, it is plain files with
+            no build step — but unlike the site it is a development harness
+            rather than a deliverable. It renders the raw grid with no art pass,
+            no audio and no haptics, and it implements the cellular layer only.
+            Fractured rock needs the rigid-body engine, which isn't written, so
+            that material is absent rather than approximated.
+          </p>
+        </div>
+
+        <div class="env">
+          <div class="env-head">
             <h3>Play the game on a phone</h3>
             <span class="env-state blocked">Not available</span>
           </div>
@@ -790,11 +817,13 @@ start docs\index.html       <span class="c"># Windows</span></code></pre>
             build exists.
           </p>
           <p class="why">
-            <b>Why this one differs:</b> the two sections above only need files
-            in a repository, and this one needs an engine. The specification
+            <b>Why this one differs:</b> the sections above only need files in a
+            repository, and this one needs a shippable game. The specification
             calls for a cellular-automata grid paired with a rigid-body layer and
-            driven off worker threads or compute shaders — none of which is
-            written yet. The gap here is implementation, not packaging, so there
+            driven off worker threads or compute shaders; the grid now exists as
+            a browser prototype, but the rigid-body layer, the parallelism, the
+            art, audio and haptics, and the mobile packaging do not. The gap here
+            is implementation, not packaging, so there
             is no shortcut that would produce something playable sooner.
           </p>
         </div>
@@ -829,13 +858,21 @@ start docs\index.html       <span class="c"># Windows</span></code></pre>
               </tr>
               <tr>
                 <td>Cellular grid (fluid, sand, clay)</td>
-                <td><span class="st todo">Not started</span></td>
-                <td>The core simulation. Everything playable depends on it.</td>
+                <td><span class="st done">Prototype</span></td>
+                <td>
+                  Working, in <code>src/</code> — fluid flow and pressure, sand
+                  at its angle of repose, absorption and pressure release,
+                  digging, and the collector. Runs in a browser; covered by 19
+                  tests, including the conservation invariant after every step.
+                </td>
               </tr>
               <tr>
                 <td>Rigid-body layer (fractured rock)</td>
                 <td><span class="st todo">Not started</span></td>
-                <td>Needs the grid first, plus the force-exchange layer between them.</td>
+                <td>
+                  The grid it needs now exists; still to come is the engine
+                  itself and the force exchange between the two.
+                </td>
               </tr>
               <tr>
                 <td>PNG level loader</td>
@@ -849,13 +886,23 @@ start docs\index.html       <span class="c"># Windows</span></code></pre>
               </tr>
               <tr>
                 <td>Volume conservation vs. absorption</td>
-                <td><span class="st open">Open question</span></td>
+                <td><span class="st done">Decided</span></td>
                 <td>
-                  The spec asks for strictly conserved volume, but also has sand
-                  absorbing fluid and lists absorption as a fail state. Either wet
-                  sand holds the fluid (conserved but immobilised) or absorption
-                  destroys it — the choice changes how the 85% threshold is
-                  computed and needs settling before the grid is built.
+                  Wet sand <em>holds</em> fluid rather than destroying it, and
+                  gives it back when enough pressure builds against the band. So
+                  volume is strictly conserved —
+                  <code>released = in play + collected + drained + held</code> —
+                  and a saturated band is a delay and a reservoir rather than a
+                  leak. Only the collector and the drains take fluid off the
+                  board, and both are counted.
+                </td>
+              </tr>
+              <tr>
+                <td>Level format</td>
+                <td><span class="st open">Interim</span></td>
+                <td>
+                  Levels are currently bands expressed in code. The PNG loader
+                  below replaces that with the same data painted as pixels.
                 </td>
               </tr>
             </tbody>
