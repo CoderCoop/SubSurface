@@ -2,12 +2,13 @@
   "name": "subsurface",
   "version": "0.0.0",
   "private": true,
+  "//": "Proof of concept. The simulation is a design validation, not a committed engine choice — see README.",
   "description": "A 2D physics puzzle about carving a path for fluid through reactive geological layers",
   "repository": {
     "type": "git",
     "url": "https://github.com/CoderCoop/SubSurface.git"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "test": "node --test test/"
   },
