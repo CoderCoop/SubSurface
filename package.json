@@ -10,7 +10,7 @@
   },
   "license": "MIT",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "planck": "^1.5.0"
