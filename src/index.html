@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>Subsurface — simulation harness</title>
+    <style>
+      :root {
+        --bg: #14110e;
+        --panel: #1e1a16;
+        --line: #372e26;
+        --ink: #ece3d8;
+        --dim: #a89880;
+        --faint: #7d6e5c;
+        --fluid: #2fd4c4;
+        --sand: #c9a26b;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--mono);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-height: 100vh;
+        padding: 16px;
+        gap: 12px;
+        /* Digging is a drag gesture; don't let it scroll the page. */
+        touch-action: none;
+        overscroll-behavior: none;
+      }
+      h1 {
+        font-size: 0.78rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--faint);
+        font-weight: 400;
+        margin: 0;
+      }
+      .rig { width: min(94vw, 380px); }
+      .hud {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        border-radius: 6px 6px 0 0;
+        border-bottom: none;
+        padding: 10px 14px 12px;
+      }
+      .row { display: flex; justify-content: space-between; gap: 10px; }
+      .cell { flex: 1; }
+      .cell .k {
+        font-size: 0.56rem;
+        letter-spacing: 0.16em;
+        color: var(--faint);
+        text-transform: uppercase;
+      }
+      .cell .v { font-size: 1.1rem; margin-top: 2px; }
+      .cell .v.teal { color: var(--fluid); }
+      .track {
+        height: 3px;
+        background: #2a2419;
+        border-radius: 2px;
+        margin-top: 10px;
+        position: relative;
+        overflow: hidden;
+      }
+      #bar { height: 100%; width: 0; background: var(--fluid); transition: width 0.2s; }
+      /* the 85% win mark */
+      .track::after {
+        content: "";
+        position: absolute;
+        left: 85%;
+        top: -2px;
+        width: 1px;
+        height: 7px;
+        background: var(--sand);
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+        aspect-ratio: 120 / 200;
+        border: 1px solid var(--line);
+        background: #17130f;
+        cursor: crosshair;
+        touch-action: none;
+      }
+      .sub {
+        display: flex;
+        justify-content: space-between;
+        border: 1px solid var(--line);
+        border-top: none;
+        border-radius: 0 0 6px 6px;
+        background: var(--panel);
+        padding: 8px 14px;
+        font-size: 0.62rem;
+        letter-spacing: 0.1em;
+        color: var(--faint);
+        text-transform: uppercase;
+      }
+      .sub b { color: var(--dim); font-weight: 400; }
+      .banner {
+        height: 22px;
+        font-size: 0.72rem;
+        letter-spacing: 0.12em;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .banner.win { color: var(--fluid); }
+      .banner.fail { color: #d98b6a; }
+      .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+      button {
+        font-family: var(--mono);
+        font-size: 0.68rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: var(--panel);
+        color: var(--ink);
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 8px 14px;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--fluid); color: var(--fluid); }
+      .note {
+        max-width: 380px;
+        font-size: 0.68rem;
+        line-height: 1.6;
+        color: var(--faint);
+        text-align: center;
+        font-family: system-ui, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Subsurface — simulation harness</h1>
+
+    <div class="rig">
+      <div class="hud">
+        <div class="row">
+          <div class="cell"><div class="k">Depth</div><div class="v" id="depth">0 m</div></div>
+          <div class="cell"><div class="k">Pressure</div><div class="v" id="pressure">0</div></div>
+          <div class="cell"><div class="k">Collected</div><div class="v teal" id="collected">0%</div></div>
+        </div>
+        <div class="track"><div id="bar"></div></div>
+      </div>
+
+      <canvas id="view" width="480" height="800"></canvas>
+
+      <div class="sub">
+        <span>In play <b id="inplay">0</b></span>
+        <span>Held by sand <b id="held">0</b></span>
+        <span>Drained <b id="lost">0</b></span>
+        <span id="seedlabel">seed 1</span>
+      </div>
+    </div>
+
+    <div class="banner" id="banner"></div>
+
+    <div class="controls">
+      <button id="reset">Restart</button>
+      <button id="next">Next seed</button>
+      <button id="solve">Show reference cut</button>
+    </div>
+
+    <p class="note">
+      Drag to dig. Clay cuts clean and holds fluid; sand collapses into whatever
+      you cut and drinks what runs through it, giving it back only under
+      pressure. Bedrock and the collector are untouchable. Get 85% of the
+      payload into the crystal.
+    </p>
+
+    <script src="sim.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
