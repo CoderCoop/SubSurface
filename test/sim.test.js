@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { Sim, MAT, buildLevel, carveIdealChannel } = require('../src/sim.js');
+const { Sim, MAT, buildLevel, carveIdealChannel } = require('../docs/play/sim.js');
 
 /*
  * This suite covers the cellular layer on its own, so its levels are built

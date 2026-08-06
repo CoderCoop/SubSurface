@@ -172,7 +172,8 @@
           collector crystal.
         </p>
         <div class="header-links">
-          <a class="btn btn-primary" href="#in-action">See it in action</a>
+          <a class="btn btn-primary" href="play/">Play the early build</a>
+          <a class="btn" href="#in-action">See it in action</a>
           <a
             class="btn"
             href="https://github.com/CoderCoop/SubSurface/blob/main/docs/design-spec.md"
@@ -783,14 +784,35 @@ start docs\index.html       <span class="c"># Windows</span></code></pre>
 
         <div class="env">
           <div class="env-head">
-            <h3>Run the simulation prototype</h3>
+            <h3>Play the early build</h3>
+            <span class="env-state ready">Available</span>
+          </div>
+          <p>
+            Nothing to install — <a href="play/">open it in a browser</a>. It is
+            a progressive web app, so on a phone you can add it to your home
+            screen from the browser menu and it will run full-screen and
+            offline afterwards.
+          </p>
+          <p class="why">
+            <b>Why this one differs:</b> it is the only entry here that needs no
+            checkout, because the game ships as part of this site rather than
+            alongside it. Everything it needs, including the physics engine, is
+            served as static files from <code>docs/play/</code> — there is no
+            server, no API and no network call once the page has loaded, which
+            is exactly why it can be cached and played with no connection.
+          </p>
+        </div>
+
+        <div class="env">
+          <div class="env-head">
+            <h3>Work on the simulation</h3>
             <span class="env-state ready">Available</span>
           </div>
           <pre><code><span class="c"># fetches the physics engine (Box2D, via planck)</span>
 npm install
 
-<span class="c"># the simulation, playable in a browser</span>
-open src/index.html         <span class="c"># or xdg-open / start</span>
+<span class="c"># the game, straight off the filesystem</span>
+open docs/play/index.html   <span class="c"># or xdg-open / start</span>
 
 <span class="c"># and the tests (Node 18+)</span>
 npm test</code></pre>
@@ -802,36 +824,37 @@ npm test</code></pre>
             into the crystal.
           </p>
           <p class="why">
-            <b>Why this one differs:</b> unlike the site, this one has a
-            dependency — <code>npm install</code> is required before the page
-            will run, because the rigid-body layer is Box2D rather than
-            something hand-rolled. There is still no bundler: planck ships a
-            plain UMD file, so the page loads it with a script tag and opens
-            straight off the filesystem. And unlike the site, this is a
-            development harness rather than a deliverable — raw grid, no art
-            pass, no audio, no haptics.
+            <b>Why this one differs:</b> the page itself needs no install — the
+            physics engine is committed alongside the game, so it opens straight
+            off the filesystem like everything else here.
+            <code>npm install</code> is for the test suite, which resolves the
+            same engine from <code>node_modules</code> rather than the vendored
+            copy. A test fails if those two ever drift apart. There is still no
+            bundler anywhere: planck ships a plain UMD file that works under
+            both a script tag and <code>require</code>.
           </p>
         </div>
 
         <div class="env">
           <div class="env-head">
-            <h3>Play the game on a phone</h3>
-            <span class="env-state blocked">Not available</span>
+            <h3>Install it on a phone</h3>
+            <span class="env-state ready">Available</span>
           </div>
           <p>
-            There is no iOS or Android build, no TestFlight or internal-testing
-            track, and no store listing. This page will not link to one until a
-            build exists.
+            Open <a href="play/">the game</a> on your phone and add it to your
+            home screen — "Add to Home Screen" in Safari's share menu, "Install
+            app" in Chrome's menu. It then launches full-screen with no browser
+            chrome and runs with no connection.
           </p>
           <p class="why">
-            <b>Why this one differs:</b> the sections above only need files in a
-            repository, and this one needs a shippable game. The specification
-            calls for a cellular-automata grid paired with a rigid-body layer and
-            driven off worker threads or compute shaders; the grid now exists as
-            a browser prototype, but the rigid-body layer, the parallelism, the
-            art, audio and haptics, and the mobile packaging do not. The gap here
-            is implementation, not packaging, so there
-            is no shortcut that would produce something playable sooner.
+            <b>Why this one differs:</b> there is still no App Store or Play
+            Store listing, and no TestFlight or internal-testing track — this
+            page will not link to one until a build exists. What changed is that
+            it no longer needs to. A progressive web app installs from the
+            browser, so the mobile packaging, review queues and signing
+            certificates the spec's native target implies are simply not on the
+            path any more. The remaining gap is the game itself — one level,
+            raw grid, no art, no audio, no haptics — rather than the delivery.
           </p>
         </div>
       </div>
@@ -867,7 +890,7 @@ npm test</code></pre>
                 <td>Cellular grid (fluid, sand, clay)</td>
                 <td><span class="st done">Proof of concept</span></td>
                 <td>
-                  Working, in <code>src/</code> — fluid flow and pressure, sand
+                  Working, in <code>docs/play/</code> — fluid flow and pressure, sand
                   at its angle of repose, absorption and pressure release,
                   digging, and the collector. Runs in a browser; covered by 32
                   tests, including the conservation invariant after every step.

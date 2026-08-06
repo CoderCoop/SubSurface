@@ -8,8 +8,11 @@ watertight clay, collapsing sand, and shattering fractured rock.
 The simulation is a hybrid of a cellular-automata particle grid (fluid, sand, clay)
 and a rigid-body engine layered on top for rock debris.
 
-**→ [codercoop.github.io/SubSurface](https://codercoop.github.io/SubSurface/)** —
-what the game is, why it exists, and how to use it.
+**→ [Play the early build](https://codercoop.github.io/SubSurface/play/)** —
+runs in any browser, installs to a phone home screen, works offline.
+
+**→ [About the project](https://codercoop.github.io/SubSurface/)** — what the
+game is, why it exists, and how to use it.
 
 ## Documentation
 
@@ -24,15 +27,22 @@ what the game is, why it exists, and how to use it.
   `main` that touch `docs/`.
 
 Every illustration on the website is a mockup of the intended design, labelled as
-such throughout. There is no game build to screenshot — the prototype below is a
-bare development harness, not the game the mockups depict.
+such throughout. They depict the finished game, which the early build below is
+not — one level, raw grid, no art pass, no audio.
 
 ## Simulation proof of concept
 
-`src/` holds a working proof of concept of both simulation systems from §4.1 of
-the spec: the cellular grid (fluid flow and pressure, sand at its angle of
-repose, absorption and pressure release, digging, the collector) and the
+`docs/play/` holds a working proof of concept of both simulation systems from
+§4.1 of the spec: the cellular grid (fluid flow and pressure, sand at its angle
+of repose, absorption and pressure release, digging, the collector) and the
 rigid-body layer for fractured rock, coupled to each other.
+
+It ships as a **progressive web app** — a set of static files served from the
+same GitHub Pages site, with a manifest and a service worker, so it installs to
+a home screen and runs offline with no store listing, no signing and no review
+queue. That is why it lives under `docs/` rather than a `src/` directory: Pages
+publishes `docs/`, and the game is part of the site rather than something built
+alongside it.
 
 **It is a proof of concept, not a committed engine choice.** Its job is to
 answer design questions cheaply — and it has answered the two that mattered:
@@ -40,22 +50,27 @@ the hybrid grid/rigid-body architecture works, and absorption reconciles with
 volume conservation. Whether the shipping game is built on this or ported to a
 game engine is deliberately still open.
 
-If it is ported, the durable artefact is `test/` rather than `src/`. Those tests
-are written as behavioural claims about the rules — grains conserve, saturated
-sand conducts pressure, a chunk lodged above a narrow passage blocks it — so
-they transfer to any implementation and serve as the contract the port has to
-satisfy.
+If it is ported, the durable artefact is `test/` rather than the implementation.
+Those tests are written as behavioural claims about the rules — grains conserve,
+saturated sand conducts pressure, a chunk lodged above a narrow passage blocks
+it — so they transfer to any implementation and serve as the contract the port
+has to satisfy.
 
 ```sh
-npm install                 # fetches Box2D (planck)
-open src/index.html         # drag to dig; or xdg-open / start
+open docs/play/index.html   # drag to dig; no install needed
+
+npm install                 # only for the tests
 npm test
 ```
 
-- `src/sim.js` — the cellular simulation. DOM-free, so it runs under Node.
-- `src/bodies.js` — rigid bodies and the interaction layer between the two.
-- `src/app.js`, `src/index.html` — canvas rendering, input and HUD.
-- `test/` — 32 tests.
+- `docs/play/sim.js` — the cellular simulation. DOM-free, so it runs under Node.
+- `docs/play/bodies.js` — rigid bodies and the interaction layer between the two.
+- `docs/play/app.js`, `index.html` — canvas rendering, input and HUD.
+- `docs/play/sw.js`, `manifest.webmanifest`, `icons/` — the PWA shell.
+- `docs/play/vendor/planck.min.js` — the physics engine, committed so the game
+  is self-contained. Refresh with `npm run vendor` after bumping the dependency;
+  a test fails if the committed copy and the installed one drift apart.
+- `test/` — 35 tests.
 
 Physics is [planck](https://piqnt.com/planck.js/), Erin Catto's Box2D ported to
 JS. We do not implement collision response, friction, restitution or solvers —
@@ -83,7 +98,7 @@ haptics.
 ## Status
 
 Pre-production. The design specification is the source of truth for intent; the
-proof of concept in `src/` is the source of truth for how the rules actually
+proof of concept in `docs/play/` is the source of truth for how the rules actually
 behave. No shipping build exists for any platform.
 
 ## Licence
