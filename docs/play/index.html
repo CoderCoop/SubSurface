@@ -91,17 +91,27 @@
         position: relative;
         overflow: hidden;
       }
-      #bar { height: 100%; width: 0; background: var(--fluid); transition: width 0.2s; }
-      /* the 85% win mark */
-      .track::after {
-        content: "";
+      .track { height: 5px; }
+      #bar,
+      #ceiling {
         position: absolute;
-        left: 85%;
-        top: -2px;
-        width: 1px;
-        height: 7px;
-        background: var(--sand);
+        inset: 0 auto 0 0;
+        height: 100%;
+        width: 0;
+        border-radius: 2px;
+        transition: width 0.2s;
       }
+      #ceiling { background: rgba(47, 212, 196, 0.22); }
+      #bar { background: var(--fluid); }
+      /* grade thresholds */
+      .mark {
+        position: absolute;
+        top: -3px;
+        width: 1px;
+        height: 11px;
+        background: var(--faint);
+      }
+      .mark.pass { background: var(--sand); }
       canvas {
         display: block;
         width: 100%;
@@ -127,15 +137,35 @@
       }
       .sub b { color: var(--dim); font-weight: 400; }
       .banner {
-        height: 22px;
+        min-height: 24px;
         font-size: 0.72rem;
-        letter-spacing: 0.12em;
+        letter-spacing: 0.1em;
         display: flex;
         align-items: center;
         justify-content: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        text-align: center;
+        max-width: min(94vw, 420px);
       }
       .banner.win { color: var(--fluid); }
       .banner.fail { color: #d98b6a; }
+      .stars { font-size: 0.95rem; letter-spacing: 0.06em; color: var(--sand); }
+      .stars .dim { opacity: 0.3; }
+      .hint {
+        display: block;
+        width: 100%;
+        color: var(--faint);
+        font-size: 0.62rem;
+        letter-spacing: 0.1em;
+        margin-top: 3px;
+      }
+      .again {
+        font-size: 0.64rem;
+        padding: 5px 11px;
+        border-color: currentColor;
+        color: inherit;
+      }
       .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
       button {
         font-family: var(--mono);
@@ -150,6 +180,145 @@
         cursor: pointer;
       }
       button:hover { border-color: var(--fluid); color: var(--fluid); }
+      button.primary {
+        background: var(--fluid);
+        color: #08201e;
+        border-color: var(--fluid);
+        font-weight: 700;
+      }
+      button.primary:hover { background: #4ce4d5; color: #08201e; }
+
+      /* --- experimental mode --- */
+      .labtoggle {
+        border: none;
+        background: none;
+        color: var(--faint);
+        font-size: 0.62rem;
+        padding: 2px 6px;
+      }
+      .lab {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        max-width: min(94vw, 380px);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel);
+        padding: 12px;
+      }
+      /* a class rule with display beats the UA [hidden] rule, so restate it */
+      .lab[hidden] { display: none; }
+      .lab label {
+        font-size: 0.62rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .lab input {
+        width: 74px;
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        background: #0f0d0b;
+        color: var(--ink);
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 7px 9px;
+      }
+      .lab p {
+        flex-basis: 100%;
+        margin: 0;
+        font-size: 0.62rem;
+        line-height: 1.6;
+        color: var(--faint);
+        font-family: system-ui, sans-serif;
+        letter-spacing: 0;
+      }
+
+      /* --- intro --- */
+      .intro {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        background: rgba(12, 10, 8, 0.93);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        overflow-y: auto;
+      }
+      .intro[hidden] { display: none; }
+      .card {
+        max-width: 420px;
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--panel);
+        padding: 24px 22px;
+      }
+      .card h2 {
+        margin: 0 0 6px;
+        font-size: 1.5rem;
+        letter-spacing: 0.02em;
+      }
+      .card .lede {
+        margin: 0 0 18px;
+        font-family: system-ui, sans-serif;
+        font-size: 0.92rem;
+        line-height: 1.55;
+        color: var(--dim);
+        letter-spacing: 0;
+      }
+      .steps {
+        margin: 0 0 18px;
+        padding-left: 18px;
+        font-family: system-ui, sans-serif;
+        font-size: 0.86rem;
+        line-height: 1.6;
+        color: var(--dim);
+        letter-spacing: 0;
+      }
+      .steps li { margin-bottom: 10px; }
+      .steps b { color: var(--ink); }
+      .teal { color: var(--fluid); }
+      .tiergrid {
+        display: flex;
+        gap: 14px;
+        margin-top: 5px;
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        color: var(--faint);
+      }
+      .tiergrid b { color: var(--sand); }
+      .mats {
+        display: grid;
+        gap: 7px;
+        margin-bottom: 20px;
+        font-family: system-ui, sans-serif;
+        font-size: 0.76rem;
+        line-height: 1.4;
+        color: var(--faint);
+        letter-spacing: 0;
+      }
+      .mats span { display: flex; align-items: flex-start; gap: 9px; }
+      .mats i {
+        flex: none;
+        width: 13px;
+        height: 13px;
+        border-radius: 3px;
+        margin-top: 2px;
+      }
+      .start {
+        width: 100%;
+        padding: 13px;
+        font-size: 0.8rem;
+        background: var(--fluid);
+        color: #08201e;
+        border-color: var(--fluid);
+        font-weight: 700;
+      }
+      .start:hover { background: #4ce4d5; color: #08201e; }
       .note {
         max-width: 380px;
         font-size: 0.68rem;
@@ -170,7 +339,16 @@
           <div class="cell"><div class="k">Pressure</div><div class="v" id="pressure">0</div></div>
           <div class="cell"><div class="k">Collected</div><div class="v teal" id="collected">0%</div></div>
         </div>
-        <div class="track"><div id="bar"></div></div>
+        <!-- Two bars in one track: the pale one is the ceiling still
+             reachable, the bright one is what has actually arrived. When the
+             ceiling drops past the 85% mark the level is lost. -->
+        <div class="track">
+          <div id="ceiling"></div>
+          <div id="bar"></div>
+          <i class="mark pass" style="left: 85%"></i>
+          <i class="mark" style="left: 92%"></i>
+          <i class="mark" style="left: 97%"></i>
+        </div>
       </div>
 
       <canvas id="view" width="480" height="800"></canvas>
@@ -180,30 +358,76 @@
         <span>Held <b id="held">0</b></span>
         <span>Drained <b id="lost">0</b></span>
         <span>Chunks <b id="chunks">0</b></span>
-        <span id="seedlabel">seed 1</span>
+        <span id="seedlabel">level 1</span>
       </div>
     </div>
 
     <div class="banner" id="banner"></div>
 
     <div class="controls">
-      <button id="reset">Restart</button>
-      <button id="next">Next seed</button>
+      <button id="reset" class="primary">Restart level</button>
+      <button id="next">Next level</button>
+      <button id="help">How to play</button>
+    </div>
+
+    <button id="labtoggle" class="labtoggle" aria-expanded="false">
+      Experimental ▾
+    </button>
+    <div class="lab" id="lab" hidden>
+      <label for="levelnum">Jump to level</label>
+      <input id="levelnum" type="number" min="1" step="1" value="1" inputmode="numeric" />
+      <button id="go">Go</button>
       <button id="solve">Show reference cut</button>
+      <p>
+        Levels are generated from their number, so every one already exists and
+        none are locked. The reference cut digs the intended route for you.
+      </p>
     </div>
 
     <p class="note">
-      Drag to dig. Clay cuts clean and holds fluid. Sand collapses into whatever
-      you cut and drinks what runs through it, giving it back only under
-      pressure. Fractured rock shatters into loose chunks that fall, tumble and
-      can wedge in the passage you just opened. Bedrock and the collector are
-      untouchable. Get 85% of the payload into the crystal.
-    </p>
-    <p class="note">
-      This is an early build of the simulation — raw grid, one level, no art
-      pass, no sound. Installable and playable offline.
+      This is an early build — raw grid, no art pass, no sound. Installable and
+      playable offline.
       <a href="../" style="color: var(--fluid)">About the project</a>
     </p>
+
+    <!-- ============================ intro ============================ -->
+    <div class="intro" id="intro">
+      <div class="card">
+        <h2>Subsurface</h2>
+        <p class="lede">
+          You are a subterranean pathfinder. Cut a path for the fluid and get it
+          down to the crystal.
+        </p>
+
+        <ol class="steps">
+          <li>
+            <b>Drag anywhere to dig.</b> Your finger carves the ground away.
+            There is no undo — a cut is permanent.
+          </li>
+          <li>
+            <b>Get <span class="teal">85%</span> of the fluid into the
+            collector</b> at the bottom. Beat it by more for a higher grade:
+            <span class="tiergrid">
+              <span>85% <b>★</b></span><span>92% <b>★★</b></span
+              ><span>97% <b>★★★</b></span>
+            </span>
+          </li>
+          <li>
+            <b>Miss it and the drains take the payload.</b> They sit either side
+            of the collector, and anything reaching them is gone for good.
+          </li>
+        </ol>
+
+        <div class="mats">
+          <span><i style="background: #8c4a32"></i>Clay — cuts clean, holds fluid</span>
+          <span><i style="background: #c9a26b"></i>Sand — collapses, drinks fluid, gives it back under pressure</span>
+          <span><i style="background: #5a6b78"></i>Fractured rock — shatters into chunks that can plug a passage</span>
+          <span><i style="background: #3a3a42"></i>Bedrock — cannot be cut</span>
+        </div>
+
+        <button id="start" class="start">Start digging</button>
+      </div>
+    </div>
 
     <!-- Box2D (planck), vendored as a plain UMD bundle so the game is a set of
          static files with no build step and no runtime network calls. Refresh
