@@ -23,12 +23,24 @@ Every illustration on the website is a mockup of the intended design, labelled a
 such throughout. There is no game build to screenshot — the prototype below is a
 bare development harness, not the game the mockups depict.
 
-## Simulation prototype
+## Simulation proof of concept
 
-`src/` holds a working prototype of both simulation systems from §4.1 of the
-spec: the cellular grid (fluid flow and pressure, sand at its angle of repose,
-absorption and pressure release, digging, the collector) and the rigid-body
-layer for fractured rock, coupled to each other.
+`src/` holds a working proof of concept of both simulation systems from §4.1 of
+the spec: the cellular grid (fluid flow and pressure, sand at its angle of
+repose, absorption and pressure release, digging, the collector) and the
+rigid-body layer for fractured rock, coupled to each other.
+
+**It is a proof of concept, not a committed engine choice.** Its job is to
+answer design questions cheaply — and it has answered the two that mattered:
+the hybrid grid/rigid-body architecture works, and absorption reconciles with
+volume conservation. Whether the shipping game is built on this or ported to a
+game engine is deliberately still open.
+
+If it is ported, the durable artefact is `test/` rather than `src/`. Those tests
+are written as behavioural claims about the rules — grains conserve, saturated
+sand conducts pressure, a chunk lodged above a narrow passage blocks it — so
+they transfer to any implementation and serve as the contract the port has to
+satisfy.
 
 ```sh
 npm install                 # fetches Box2D (planck)
@@ -66,5 +78,13 @@ haptics.
 
 ## Status
 
-Pre-production. The design specification is the current source of truth; no engine
-code has been written yet.
+Pre-production. The design specification is the source of truth for intent; the
+proof of concept in `src/` is the source of truth for how the rules actually
+behave. No shipping build exists for any platform.
+
+## Licence
+
+[MIT](LICENSE). Subsurface is open source, and any future engine choice is
+expected to keep it that way — worth noting when that decision comes up, since
+it rules some engines in and others out. The one dependency,
+[planck](https://piqnt.com/planck.js/), is MIT as well.
