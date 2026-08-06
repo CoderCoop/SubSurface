@@ -4,6 +4,15 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { Sim, MAT, buildLevel, carveIdealChannel } = require('../src/sim.js');
 
+/*
+ * This suite covers the cellular layer on its own, so its levels are built
+ * without the fractured slab. Fractured rock is inert to the grid — only the
+ * rigid-body layer can detach it — so leaving it in would block the corridor
+ * and make every level here unsolvable for reasons that have nothing to do
+ * with the rules under test. bodies.test.js covers it with that layer active.
+ */
+const level = (opts) => buildLevel(Object.assign({ fractured: false }, opts));
+
 // A bare grid with a bedrock shell and nothing inside, for unit-level rules.
 function blank(w, h, seed) {
   const s = new Sim(w, h, seed === undefined ? 42 : seed);
@@ -39,7 +48,7 @@ function run(sim, steps) {
 // ---------------------------------------------------------------------------
 
 test('conservation holds every step in a level with sand and a channel', () => {
-  const sim = carveIdealChannel(buildLevel({ w: 90, h: 150, seed: 7 }));
+  const sim = carveIdealChannel(level({ w: 90, h: 150, seed: 7 }));
   assert.ok(sim.released > 0, 'level should release some fluid');
 
   for (let i = 0; i < 900; i++) {
@@ -54,7 +63,7 @@ test('conservation holds every step in a level with sand and a channel', () => {
 });
 
 test('conservation holds with no digging at all', () => {
-  const sim = buildLevel({ w: 60, h: 100, seed: 3 });
+  const sim = level({ w: 60, h: 100, seed: 3 });
   const s = run(sim, 300);
   assert.ok(s.balanced);
   assert.strictEqual(s.collected, 0, 'sealed level collects nothing');
@@ -265,7 +274,7 @@ test('a swipe leaves a continuous tunnel, not a dotted line', () => {
 });
 
 test('digging is irreversible — nothing ever refills', () => {
-  const sim = buildLevel({ w: 60, h: 100, seed: 5 });
+  const sim = level({ w: 60, h: 100, seed: 5 });
   const g = sim.geometry;
   sim.digLine(g.centreX, g.sealTop, g.centreX, g.cavernTop, 3);
 
@@ -287,7 +296,7 @@ test('digging is irreversible — nothing ever refills', () => {
 // ---------------------------------------------------------------------------
 
 test('the reference channel clears the 85% win threshold', () => {
-  const sim = carveIdealChannel(buildLevel({ w: 90, h: 150, seed: 7 }));
+  const sim = carveIdealChannel(level({ w: 90, h: 150, seed: 7 }));
   // A wide reservoir draining through a narrow shaft takes a while — the
   // fluid is viscous by design, so give it time to finish rather than
   // reading a percentage off a level that is still emptying.
@@ -301,7 +310,7 @@ test('the reference channel clears the 85% win threshold', () => {
 });
 
 test('a shaft cut through the sand band fails', () => {
-  const sim = buildLevel({ w: 90, h: 150, seed: 7 });
+  const sim = level({ w: 90, h: 150, seed: 7 });
   const g = sim.geometry;
   // Straight down the middle, through the sand rather than around it.
   sim.digLine(g.centreX, g.sealTop - 1, g.centreX, g.floorY - 1, 3);
@@ -320,7 +329,7 @@ test('a shaft cut through the sand band fails', () => {
 });
 
 test('the sand band collapses into a shaft cut through it', () => {
-  const sim = buildLevel({ w: 90, h: 150, seed: 7 });
+  const sim = level({ w: 90, h: 150, seed: 7 });
   const g = sim.geometry;
   sim.digLine(g.centreX, g.sandTop - 4, g.centreX, g.sandBot + 4, 3);
   // Count after the cut: digging destroys grains, so the conservation claim
@@ -348,7 +357,7 @@ test('the sand band collapses into a shaft cut through it', () => {
 });
 
 test('runs are deterministic for a given seed', () => {
-  const a = run(carveIdealChannel(buildLevel({ w: 60, h: 100, seed: 11 })), 500);
-  const b = run(carveIdealChannel(buildLevel({ w: 60, h: 100, seed: 11 })), 500);
+  const a = run(carveIdealChannel(level({ w: 60, h: 100, seed: 11 })), 500);
+  const b = run(carveIdealChannel(level({ w: 60, h: 100, seed: 11 })), 500);
   assert.deepStrictEqual(a, b);
 });

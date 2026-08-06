@@ -9,6 +9,7 @@
   'use strict';
 
   var S = window.Subsurface;
+  var B = window.SubsurfaceBodies;
   var MAT = S.MAT,
     COLORS = S.COLORS;
 
@@ -30,7 +31,7 @@
   var bctx = buf.getContext('2d');
   var img = bctx.createImageData(GRID_W, GRID_H);
 
-  var sim, seed = 1, outcome = null, digging = false, last = null;
+  var sim, bodies, seed = 1, outcome = null, digging = false, last = null;
   var stall = 0, prev = '';
 
   var el = {
@@ -42,12 +43,14 @@
     lost: document.getElementById('lost'),
     inplay: document.getElementById('inplay'),
     banner: document.getElementById('banner'),
+    chunks: document.getElementById('chunks'),
     seed: document.getElementById('seedlabel')
   };
 
   function reset(newSeed) {
     seed = newSeed === undefined ? seed : newSeed;
     sim = S.buildLevel({ w: GRID_W, h: GRID_H, seed: seed });
+    bodies = new B.Bodies(sim);
     outcome = null;
     stall = 0;
     prev = '';
@@ -95,6 +98,24 @@
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, display.width, display.height);
     ctx.drawImage(buf, 0, 0, display.width, display.height);
+
+    // Rigid chunks are drawn as real polygons rather than through the cell
+    // buffer, so their rotation reads clearly as they tumble.
+    var sx = display.width / GRID_W,
+      sy = display.height / GRID_H;
+    var outs = bodies.outlines();
+    for (var k = 0; k < outs.length; k++) {
+      var pts = outs[k];
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0] * sx, pts[0][1] * sy);
+      for (var j = 1; j < pts.length; j++) ctx.lineTo(pts[j][0] * sx, pts[j][1] * sy);
+      ctx.closePath();
+      ctx.fillStyle = '#5a6b78';
+      ctx.fill();
+      ctx.strokeStyle = '#7b8d9a';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
   }
 
   function updateHud(s) {
@@ -105,6 +126,7 @@
     el.held.textContent = s.heldBySand;
     el.lost.textContent = s.lost;
     el.inplay.textContent = s.inPlay;
+    el.chunks.textContent = bodies.count();
   }
 
   function checkOutcome(s) {
@@ -137,7 +159,10 @@
   }
 
   function frame() {
-    for (var i = 0; i < STEPS_PER_FRAME; i++) sim.step();
+    for (var i = 0; i < STEPS_PER_FRAME; i++) {
+      bodies.step(1 / 60);
+      sim.step();
+    }
     var s = sim.stats();
     draw();
     updateHud(s);
@@ -160,15 +185,21 @@
     display.setPointerCapture(ev.pointerId);
     digging = true;
     last = toGrid(ev);
-    sim.dig(last.x, last.y, DIG_RADIUS);
+    shatter(sim.dig(last.x, last.y, DIG_RADIUS));
   });
+
+  // Cutting into fractured rock hands whole chunks to the physics world.
+  function shatter(r) {
+    if (r.shattered.length) bodies.shatterAll(r.shattered);
+    if (r.removed || r.shattered.length) bodies.markTerrainDirty();
+  }
 
   display.addEventListener('pointermove', function (ev) {
     if (!digging) return;
     ev.preventDefault();
     var p = toGrid(ev);
     // Interpolate, so a fast swipe cuts a continuous tunnel.
-    sim.digLine(last.x, last.y, p.x, p.y, DIG_RADIUS);
+    shatter(sim.digLine(last.x, last.y, p.x, p.y, DIG_RADIUS));
     last = p;
   });
 
@@ -189,7 +220,15 @@
     reset(seed + 1);
   });
   document.getElementById('solve').addEventListener('click', function () {
-    S.carveIdealChannel(sim);
+    var g = sim.geometry;
+    var r = sim.digLine(
+      g.routeX,
+      g.sealTop - 1,
+      g.routeX,
+      g.floorY - 1,
+      Math.max(2, Math.round(sim.w * 0.03))
+    );
+    shatter(r);
   });
 
   reset(1);

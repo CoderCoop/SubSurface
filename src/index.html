@@ -152,8 +152,9 @@
 
       <div class="sub">
         <span>In play <b id="inplay">0</b></span>
-        <span>Held by sand <b id="held">0</b></span>
+        <span>Held <b id="held">0</b></span>
         <span>Drained <b id="lost">0</b></span>
+        <span>Chunks <b id="chunks">0</b></span>
         <span id="seedlabel">seed 1</span>
       </div>
     </div>
@@ -167,13 +168,18 @@
     </div>
 
     <p class="note">
-      Drag to dig. Clay cuts clean and holds fluid; sand collapses into whatever
+      Drag to dig. Clay cuts clean and holds fluid. Sand collapses into whatever
       you cut and drinks what runs through it, giving it back only under
-      pressure. Bedrock and the collector are untouchable. Get 85% of the
-      payload into the crystal.
+      pressure. Fractured rock shatters into loose chunks that fall, tumble and
+      can wedge in the passage you just opened. Bedrock and the collector are
+      untouchable. Get 85% of the payload into the crystal.
     </p>
 
+    <!-- Box2D (planck), loaded straight from node_modules: it is a plain UMD
+         bundle, so there is still no build step. Run `npm install` first. -->
+    <script src="../node_modules/planck/dist/planck.js"></script>
     <script src="sim.js"></script>
+    <script src="bodies.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
