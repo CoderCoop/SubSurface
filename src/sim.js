@@ -41,7 +41,8 @@
     WETSAND = 4,
     WATER = 5,
     COLLECTOR = 6,
-    DRAIN = 7;
+    DRAIN = 7,
+    FRACTURED = 8;
 
   var MAT = {
     EMPTY: EMPTY,
@@ -51,7 +52,8 @@
     WETSAND: WETSAND,
     WATER: WATER,
     COLLECTOR: COLLECTOR,
-    DRAIN: DRAIN
+    DRAIN: DRAIN,
+    FRACTURED: FRACTURED
   };
 
   var NAMES = {};
@@ -63,6 +65,7 @@
   NAMES[WATER] = 'fluid';
   NAMES[COLLECTOR] = 'collector';
   NAMES[DRAIN] = 'drain';
+  NAMES[FRACTURED] = 'fractured rock';
 
   // Earthy, muted terrain against a vibrant teal payload (spec §3.1).
   var COLORS = {};
@@ -74,6 +77,7 @@
   COLORS[WATER] = [47, 212, 196];
   COLORS[COLLECTOR] = [246, 232, 160];
   COLORS[DRAIN] = [12, 10, 8];
+  COLORS[FRACTURED] = [90, 107, 120];
 
   // Deterministic PRNG: same seed means the same run, which is what makes the
   // integration tests meaningful and lets a level be replayed exactly.
@@ -94,6 +98,24 @@
     this.moved = new Uint8Array(w * h);
     this.head = new Uint16Array(w * h); // contiguous fluid depth, drives pressure
     this.tint = new Int8Array(w * h); // per-cell colour jitter, cosmetic only
+
+    /*
+     * Rigid-body coupling (spec §4.1, interaction layer). The bodies layer
+     * stamps occupied cells into `mask` each frame, and `get` reports those
+     * cells as bedrock — so every cellular rule treats a rock chunk as solid
+     * without knowing rigid bodies exist. This is the "rigid bodies act as
+     * collision masks masking out grid cells" half of the contract; the
+     * buoyancy half lives in bodies.js.
+     */
+    this.mask = new Uint8Array(w * h);
+
+    // Fractured rock is pre-scored into chunks: -1 for everything else, else
+    // the id of the chunk a cell belongs to. Cutting any part of a chunk
+    // detaches the whole thing, which is what makes it shatter into pieces
+    // rather than crumble cell by cell.
+    this.chunkId = new Int16Array(w * h).fill(-1);
+    this.chunks = [];
+    this.chunkIndex = {}; // scoring grid key -> chunk id, build time only
     this.rand = mulberry32(seed === undefined ? 1 : seed);
     this.frame = 0;
 
@@ -123,6 +145,16 @@
   // otherwise, so fluid can never quietly fall off the edge of the grid
   // without being counted.
   Sim.prototype.get = function (x, y) {
+    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return BEDROCK;
+    var i = y * this.w + x;
+    // A cell occupied by a rigid body is solid to everything cellular.
+    if (this.mask[i]) return BEDROCK;
+    return this.cells[i];
+  };
+
+  // The material actually stored in a cell, ignoring any body sitting on it.
+  // Digging and bookkeeping use this; the cellular rules use `get`.
+  Sim.prototype.raw = function (x, y) {
     if (x < 0 || y < 0 || x >= this.w || y >= this.h) return BEDROCK;
     return this.cells[y * this.w + x];
   };
@@ -358,7 +390,8 @@
     var r2 = r * r,
       removed = 0,
       grit = 0,
-      freed = 0;
+      freed = 0,
+      shattered = [];
     var y0 = Math.max(0, cy - r),
       y1 = Math.min(this.h - 1, cy + r);
     var x0 = Math.max(0, cx - r),
@@ -380,11 +413,21 @@
           removed++;
           grit++;
           freed++;
+        } else if (m === FRACTURED) {
+          // Do not erode it — record the chunk so the bodies layer can
+          // detach the whole piece. The cells stay put until it does.
+          var id = this.chunkId[i];
+          if (id >= 0 && shattered.indexOf(id) === -1) shattered.push(id);
         }
       }
     }
     // grit drives the gravel-crunch layer of the audio mix (spec §3.2).
-    return { removed: removed, grit: grit, freed: freed };
+    return {
+      removed: removed,
+      grit: grit,
+      freed: freed,
+      shattered: shattered
+    };
   };
 
   // Swipes arrive as sampled points; interpolate so a fast drag leaves a
@@ -393,15 +436,36 @@
     var dx = x1 - x0,
       dy = y1 - y0;
     var steps = Math.max(1, Math.ceil(Math.sqrt(dx * dx + dy * dy)));
-    var total = { removed: 0, grit: 0, freed: 0 };
+    var total = { removed: 0, grit: 0, freed: 0, shattered: [] };
     for (var s = 0; s <= steps; s++) {
       var t = s / steps;
       var one = this.dig(x0 + dx * t, y0 + dy * t, r);
       total.removed += one.removed;
       total.grit += one.grit;
       total.freed += one.freed;
+      for (var k = 0; k < one.shattered.length; k++)
+        if (total.shattered.indexOf(one.shattered[k]) === -1)
+          total.shattered.push(one.shattered[k]);
     }
     return total;
+  };
+
+  // Lift a scored chunk out of the grid, returning the cells it occupied so
+  // the bodies layer can build a rigid body from them.
+  Sim.prototype.detachChunk = function (id) {
+    var c = this.chunks[id];
+    if (!c || c.detached) return null;
+    c.detached = true;
+    var cells = [];
+    for (var y = c.y0; y <= c.y1; y++)
+      for (var x = c.x0; x <= c.x1; x++) {
+        var i = y * this.w + x;
+        if (this.chunkId[i] === id && this.cells[i] === FRACTURED) {
+          this.cells[i] = EMPTY;
+          cells.push([x, y]);
+        }
+      }
+    return cells.length ? { id: id, cells: cells, box: c } : null;
   };
 
   Sim.prototype.stats = function () {
@@ -501,6 +565,40 @@
     for (y = ribY; y < ribY + ribH; y++)
       for (x = WALL; x < col(0.3); x++) sim.set(x, y, BEDROCK);
 
+    /*
+     * A fractured slab across the clay corridor, pre-scored into chunks. It
+     * sits on the easy route on purpose: the corridor is the way down, and
+     * this is the toll. Cut it and you get loose rock tumbling into the shaft
+     * you just made, where it can wedge and throttle the flow — or, cut
+     * carefully, act as a valve.
+     */
+    var fracTop = band(0.7),
+      fracBot = band(0.78),
+      fracL = col(0.62),
+      fracR = w - WALL;
+    if (opts.fractured !== false) {
+      var CH = Math.max(3, Math.round(0.035 * w)); // chunk edge, in cells
+      for (y = fracTop; y < fracBot; y++)
+        for (x = fracL; x < fracR; x++) {
+          sim.set(x, y, FRACTURED);
+          var gx = Math.floor((x - fracL) / CH),
+            gy = Math.floor((y - fracTop) / CH);
+          var key = gy * 1000 + gx;
+          var id = sim.chunkIndex[key];
+          if (id === undefined) {
+            id = sim.chunks.length;
+            sim.chunkIndex[key] = id;
+            sim.chunks.push({ x0: x, y0: y, x1: x, y1: y, detached: false });
+          }
+          var c = sim.chunks[id];
+          if (x < c.x0) c.x0 = x;
+          if (x > c.x1) c.x1 = x;
+          if (y < c.y0) c.y0 = y;
+          if (y > c.y1) c.y1 = y;
+          sim.chunkId[y * w + x] = id;
+        }
+    }
+
     // Dry sand pockets suspended in the lower clay.
     var pockets = [
       [col(0.24), band(0.74), Math.round(0.07 * w)],
@@ -567,7 +665,10 @@
       basinL: basinL,
       basinR: basinR,
       centreX: Math.round(w / 2),
-      routeX: col(0.78) // down the clay corridor, into the basin
+      routeX: col(0.78), // down the clay corridor, into the basin
+      fracTop: fracTop,
+      fracBot: fracBot,
+      fracL: fracL
     };
     return sim;
   }

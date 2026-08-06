@@ -786,23 +786,30 @@ start docs\index.html       <span class="c"># Windows</span></code></pre>
             <h3>Run the simulation prototype</h3>
             <span class="env-state ready">Available</span>
           </div>
-          <pre><code><span class="c"># the grid simulation, playable in a browser</span>
+          <pre><code><span class="c"># fetches the physics engine (Box2D, via planck)</span>
+npm install
+
+<span class="c"># the simulation, playable in a browser</span>
 open src/index.html         <span class="c"># or xdg-open / start</span>
 
-<span class="c"># and the test suite (Node 18+, no dependencies)</span>
-node --test test/sim.test.js</code></pre>
+<span class="c"># and the tests (Node 18+)</span>
+npm test</code></pre>
           <p>
-            Drag to dig. Clay cuts clean and holds fluid; sand collapses into
+            Drag to dig. Clay cuts clean and holds fluid. Sand collapses into
             whatever you cut and drinks what runs through it, giving it back
-            only under pressure. Get 85% of the payload into the crystal.
+            only under pressure. Fractured rock shatters into loose chunks that
+            can wedge in the passage you just opened. Get 85% of the payload
+            into the crystal.
           </p>
           <p class="why">
-            <b>Why this one differs:</b> like the site, it is plain files with
-            no build step — but unlike the site it is a development harness
-            rather than a deliverable. It renders the raw grid with no art pass,
-            no audio and no haptics, and it implements the cellular layer only.
-            Fractured rock needs the rigid-body engine, which isn't written, so
-            that material is absent rather than approximated.
+            <b>Why this one differs:</b> unlike the site, this one has a
+            dependency — <code>npm install</code> is required before the page
+            will run, because the rigid-body layer is Box2D rather than
+            something hand-rolled. There is still no bundler: planck ships a
+            plain UMD file, so the page loads it with a script tag and opens
+            straight off the filesystem. And unlike the site, this is a
+            development harness rather than a deliverable — raw grid, no art
+            pass, no audio, no haptics.
           </p>
         </div>
 
@@ -862,16 +869,19 @@ node --test test/sim.test.js</code></pre>
                 <td>
                   Working, in <code>src/</code> — fluid flow and pressure, sand
                   at its angle of repose, absorption and pressure release,
-                  digging, and the collector. Runs in a browser; covered by 19
+                  digging, and the collector. Runs in a browser; covered by 32
                   tests, including the conservation invariant after every step.
                 </td>
               </tr>
               <tr>
                 <td>Rigid-body layer (fractured rock)</td>
-                <td><span class="st todo">Not started</span></td>
+                <td><span class="st done">Prototype</span></td>
                 <td>
-                  The grid it needs now exists; still to come is the engine
-                  itself and the force exchange between the two.
+                  Box2D (via <a href="https://piqnt.com/planck.js/">planck</a>)
+                  drives the chunks; the interaction layer is ours. Fluid exerts
+                  buoyancy and drag on the bodies, and the bodies mask out grid
+                  cells so every cellular rule treats a chunk as solid without
+                  knowing rigid bodies exist.
                 </td>
               </tr>
               <tr>

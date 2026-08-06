@@ -25,18 +25,29 @@ bare development harness, not the game the mockups depict.
 
 ## Simulation prototype
 
-`src/` holds a working prototype of the cellular-automata grid from §4.1 of the
-spec: fluid flow and pressure, sand at its angle of repose, absorption and
-pressure release, digging, and the collector.
+`src/` holds a working prototype of both simulation systems from §4.1 of the
+spec: the cellular grid (fluid flow and pressure, sand at its angle of repose,
+absorption and pressure release, digging, the collector) and the rigid-body
+layer for fractured rock, coupled to each other.
 
 ```sh
+npm install                 # fetches Box2D (planck)
 open src/index.html         # drag to dig; or xdg-open / start
-node --test test/sim.test.js
+npm test
 ```
 
-- `src/sim.js` — the simulation. DOM-free, so it runs headlessly under Node.
+- `src/sim.js` — the cellular simulation. DOM-free, so it runs under Node.
+- `src/bodies.js` — rigid bodies and the interaction layer between the two.
 - `src/app.js`, `src/index.html` — canvas rendering, input and HUD.
-- `test/sim.test.js` — 19 tests, no dependencies.
+- `test/` — 32 tests.
+
+Physics is [planck](https://piqnt.com/planck.js/), Erin Catto's Box2D ported to
+JS. We do not implement collision response, friction, restitution or solvers —
+the library does. What is written here is the part no library provides: the
+two-way contract between a particle grid and a rigid-body world, which the spec
+states as *grid particles exert buoyancy/pressure forces on the rigid bodies*
+and *rigid bodies act as collision masks masking out grid cells*. Both
+directions are implemented; everything else is delegated.
 
 **Fluid is strictly conserved.** Every unit released is, at every instant, in
 exactly one of four places:
@@ -50,8 +61,8 @@ it, and gives it back once enough pressure builds against the band — so a
 saturated band is a delay and a reservoir, not a leak. The test suite asserts
 that invariant after every step of a full run.
 
-Not implemented: the rigid-body layer for fractured rock, chunk sleeping,
-multithreading, the PNG level loader, audio and haptics.
+Not implemented: chunk sleeping, multithreading, the PNG level loader, audio and
+haptics.
 
 ## Status
 
