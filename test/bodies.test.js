@@ -2,8 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { Sim, MAT, buildLevel } = require('../src/sim.js');
-const { Bodies } = require('../src/bodies.js');
+const { Sim, MAT, buildLevel } = require('../docs/play/sim.js');
+const { Bodies } = require('../docs/play/bodies.js');
 
 function blank(w, h, seed) {
   const s = new Sim(w, h, seed === undefined ? 42 : seed);

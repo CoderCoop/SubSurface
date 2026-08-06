@@ -2,8 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-    <title>Subsurface — simulation harness</title>
+    <!-- viewport-fit=cover so the dark shell reaches under the notch and the
+         home indicator when installed; the safe-area insets are honoured in
+         the body padding below. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>Subsurface</title>
+    <meta
+      name="description"
+      content="Carve pathways through reactive geological layers to guide a volume of viscous fluid down to a collector crystal."
+    />
+
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#14110e" />
+    <link rel="icon" href="icons/icon-192.png" />
+    <!-- iOS ignores the manifest for install; these are what it reads. -->
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Subsurface" />
     <style>
       :root {
         --bg: #14110e;
@@ -26,11 +45,17 @@
         flex-direction: column;
         align-items: center;
         min-height: 100vh;
-        padding: 16px;
+        /* dvh tracks the shrinking viewport when mobile browser chrome hides */
+        min-height: 100dvh;
+        padding: calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
+          calc(12px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
         gap: 12px;
         /* Digging is a drag gesture; don't let it scroll the page. */
         touch-action: none;
         overscroll-behavior: none;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
       }
       h1 {
         font-size: 0.78rem;
@@ -136,7 +161,7 @@
     </style>
   </head>
   <body>
-    <h1>Subsurface — simulation harness</h1>
+    <h1>Subsurface — early build</h1>
 
     <div class="rig">
       <div class="hud">
@@ -174,12 +199,32 @@
       can wedge in the passage you just opened. Bedrock and the collector are
       untouchable. Get 85% of the payload into the crystal.
     </p>
+    <p class="note">
+      This is an early build of the simulation — raw grid, one level, no art
+      pass, no sound. Installable and playable offline.
+      <a href="../" style="color: var(--fluid)">About the project</a>
+    </p>
 
-    <!-- Box2D (planck), loaded straight from node_modules: it is a plain UMD
-         bundle, so there is still no build step. Run `npm install` first. -->
-    <script src="../node_modules/planck/dist/planck.js"></script>
+    <!-- Box2D (planck), vendored as a plain UMD bundle so the game is a set of
+         static files with no build step and no runtime network calls. Refresh
+         it with `npm run vendor` after bumping the dependency. -->
+    <script src="vendor/planck.min.js"></script>
     <script src="sim.js"></script>
     <script src="bodies.js"></script>
     <script src="app.js"></script>
+
+    <script>
+      // Service worker: makes the game installable and playable offline.
+      // Only registers over http(s) — opening index.html from the filesystem
+      // is still perfectly playable, it just has no worker, and attempting to
+      // register from a file:// origin throws.
+      if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('sw.js').catch(function (err) {
+            console.warn('Service worker registration failed:', err);
+          });
+        });
+      }
+    </script>
   </body>
 </html>
