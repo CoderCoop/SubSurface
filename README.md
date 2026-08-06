@@ -8,16 +8,20 @@ watertight clay, collapsing sand, and shattering fractured rock.
 The simulation is a hybrid of a cellular-automata particle grid (fluid, sand, clay)
 and a rigid-body engine layered on top for rock debris.
 
+**→ [codercoop.github.io/SubSurface](https://codercoop.github.io/SubSurface/)** —
+what the game is, why it exists, and how to use it.
+
 ## Documentation
 
 - [Game Design & Technical Specification](docs/design-spec.md) — gameplay mechanics,
   material behaviours, art and audio direction, simulation architecture, level data
   format, and progression.
-- **Project website** — `docs/index.html`. Plain static HTML and CSS with no build
-  step; open it straight from a checkout, or view it on GitHub Pages once Pages is
-  enabled for the repository. Deployed by
-  [`.github/workflows/pages.yml`](.github/workflows/pages.yml) on pushes to `main`
-  that touch `docs/`.
+- **Project website** — live at
+  [codercoop.github.io/SubSurface](https://codercoop.github.io/SubSurface/),
+  source in `docs/index.html`. Plain static HTML and CSS with no build step, so
+  you can also open it straight from a checkout. Deployed by
+  [`.github/workflows/pages.yml`](.github/workflows/pages.yml) on pushes to
+  `main` that touch `docs/`.
 
 Every illustration on the website is a mockup of the intended design, labelled as
 such throughout. There is no game build to screenshot — the prototype below is a
