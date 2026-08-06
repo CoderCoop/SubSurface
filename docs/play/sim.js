@@ -664,6 +664,8 @@
       floorY: floorY,
       basinL: basinL,
       basinR: basinR,
+      basinBot: basinBot,
+      drains: drains,
       centreX: Math.round(w / 2),
       routeX: col(0.78), // down the clay corridor, into the basin
       fracTop: fracTop,
