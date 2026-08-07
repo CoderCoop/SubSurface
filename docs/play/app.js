@@ -62,8 +62,12 @@
 
   var sim, bodies, seed = 1, outcome = null, digging = false, last = null;
   var stall = 0, prev = '', tick = 0, cursor = null, passed = false;
+  // Elapsed play time for the level: accrues only while the level is live,
+  // so it never counts the title screen or a finished run.
+  var elapsed = 0, lastFrame = 0, clearTime = null;
 
   var el = {
+    time: document.getElementById('time'),
     depth: document.getElementById('depth'),
     pressure: document.getElementById('pressure'),
     collected: document.getElementById('collected'),
@@ -89,6 +93,9 @@
     bodies = new B.Bodies(sim);
     outcome = null;
     passed = false;
+    elapsed = 0;
+    clearTime = null;
+    lastFrame = 0;
     stall = 0;
     prev = '';
     el.banner.className = 'banner';
@@ -105,7 +112,7 @@
    * lighting is all single-neighbour lookups — enough to give the cross
    * section depth without costing a second pass over 24,000 cells.
    * ------------------------------------------------------------------- */
-  function draw() {
+  function draw(s) {
     var d = img.data,
       cells = sim.cells,
       tint = sim.tint,
@@ -144,18 +151,46 @@
         r += tint[i];
         g += tint[i];
         b += tint[i];
-        // Rim light on any surface facing open space, plus a softer second
-        // row, which is what turns flat bands into layers with a top face.
+        /*
+         * Lighting the ground. A single top-facing rim light made the bands
+         * look like flat stripes with a highlight; what gives a cross-section
+         * depth is knowing which cells are exposed and which are buried.
+         *
+         * Key light from above, a weaker bounce from the sides, and occlusion
+         * for anything with material on all four sides. Every term is one
+         * array read, in the pass that already exists.
+         */
         if (openAbove) {
-          r += 26;
-          g += 24;
-          b += 20;
-        } else if (i >= 2 * w) {
-          var a2 = cells[i - 2 * w];
-          if (a2 === MAT.EMPTY || a2 === MAT.WATER) {
-            r += 10;
-            g += 9;
-            b += 8;
+          r += 30;
+          g += 28;
+          b += 23;
+        } else {
+          if (i >= 2 * w) {
+            var a2 = cells[i - 2 * w];
+            if (a2 === MAT.EMPTY || a2 === MAT.WATER) {
+              r += 12;
+              g += 11;
+              b += 9;
+            }
+          }
+          var lx = i % w === 0 ? m : cells[i - 1];
+          var rx = (i + 1) % w === 0 ? m : cells[i + 1];
+          var openSide =
+            lx === MAT.EMPTY || lx === MAT.WATER || rx === MAT.EMPTY || rx === MAT.WATER;
+          if (openSide) {
+            // Grazing bounce on a wall face — enough to catch the eye without
+            // competing with the key light overhead.
+            r += 9;
+            g += 8;
+            b += 7;
+          } else {
+            var bl = i + w < cells.length ? cells[i + w] : m;
+            if (bl !== MAT.EMPTY && bl !== MAT.WATER) {
+              // Fully enclosed: sink it back so open faces read as surfaces.
+              r -= 11;
+              g -= 10;
+              b -= 8;
+            }
           }
         }
       }
@@ -175,78 +210,176 @@
     var sx = display.width / GRID_W,
       sy = display.height / GRID_H;
 
-    drawTargets(sx, sy);
+    drawTargets(sx, sy, s);
     drawChunks(sx, sy);
     drawCursor(sx, sy);
   }
 
-  // The goal and the hazards, marked on the terrain itself — the single most
-  // useful thing to make legible, since the whole puzzle is "which hole does
-  // the payload fall into".
-  function drawTargets(sx, sy) {
+  /*
+   * The goal and the hazards.
+   *
+   * These used to be labelled COLLECTOR and DRAIN in text, which is a caption
+   * over the world rather than the world reading clearly. They are now told
+   * apart by three things at once, none of which need reading:
+   *
+   *   shape   the collector is spikes pointing UP, receiving; a drain is teeth
+   *           pointing DOWN, swallowing
+   *   light   the collector emits — a warm glow that brightens as it fills;
+   *           a drain emits nothing and fades to black
+   *   motion  motes drift UP out of the crystal; streaks fall DOWN the drain
+   *
+   * Up/warm/lit against down/cold/dark is legible at a glance and in
+   * peripheral vision, which a word never is.
+   */
+  function drawTargets(sx, sy, s) {
     var g = sim.geometry;
     if (!g) return;
-    var pulse = 0.55 + Math.sin(tick * 0.06) * 0.45;
-
-    // Collector: warm glow, bracket, and a label.
-    var cx = ((g.basinL + g.basinR) / 2) * sx;
     var top = g.floorY * sy;
-    var halfW = ((g.basinR - g.basinL) / 2) * sx;
+    var bot = Math.min(sim.h, g.basinBot + 1) * sy;
+    var fill = Math.min(1, (s.collectionPct || 0) / 100);
 
+    drawCollector(sx, sy, top, bot, fill);
+    drawDrains(sx, sy, top, bot);
+  }
+
+  function drawCollector(sx, sy, top, bot, fill) {
+    var g = sim.geometry;
+    var l = g.basinL * sx,
+      r = (g.basinR + 1) * sx;
+    var cx = (l + r) / 2,
+      w = r - l,
+      h = bot - top;
+    var breathe = 0.6 + Math.sin(tick * 0.04) * 0.4;
+
+    // Light spilling upward out of the mouth. Brightens as it fills, so a
+    // level nearing its target is visible from across the screen.
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    var grad = ctx.createRadialGradient(cx, top, 0, cx, top, halfW * 2.6);
-    grad.addColorStop(0, 'rgba(246,232,160,' + (0.3 + pulse * 0.22) + ')');
-    grad.addColorStop(1, 'rgba(246,232,160,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(cx - halfW * 2.6, top - halfW * 2.6, halfW * 5.2, halfW * 5.2);
+    var reach = w * (1.3 + fill * 1.2);
+    var glow = ctx.createRadialGradient(cx, top, 0, cx, top, reach);
+    var a = 0.16 + fill * 0.34 + breathe * 0.08;
+    glow.addColorStop(0, 'rgba(246,232,160,' + a.toFixed(3) + ')');
+    glow.addColorStop(0.5, 'rgba(246,220,130,' + (a * 0.35).toFixed(3) + ')');
+    glow.addColorStop(1, 'rgba(246,232,160,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(cx - reach, top - reach, reach * 2, reach * 2);
     ctx.restore();
 
     ctx.save();
-    ctx.strokeStyle = 'rgba(246,232,160,' + (0.5 + pulse * 0.5) + ')';
-    ctx.lineWidth = 2;
-    var bt = top - 6;
     ctx.beginPath();
-    ctx.moveTo(cx - halfW, bt + 7);
-    ctx.lineTo(cx - halfW, bt);
-    ctx.lineTo(cx + halfW, bt);
-    ctx.lineTo(cx + halfW, bt + 7);
-    ctx.stroke();
+    ctx.rect(l, top, w, h);
+    ctx.clip();
 
-    // A chevron bobbing above the basin, pointing down into it.
-    var chevY = bt - 16 - pulse * 4;
-    ctx.beginPath();
-    ctx.moveTo(cx - 7, chevY);
-    ctx.lineTo(cx, chevY + 7);
-    ctx.lineTo(cx + 7, chevY);
-    ctx.stroke();
+    // Collected fluid pooling in the trough, rising with the score.
+    if (fill > 0) {
+      var level = bot - h * fill;
+      ctx.fillStyle = 'rgba(47,212,196,0.5)';
+      ctx.fillRect(l, level, w, bot - level);
+      ctx.fillStyle = 'rgba(157,246,236,0.9)';
+      ctx.fillRect(l, level, w, 1.5);
+    }
 
-    ctx.fillStyle = 'rgba(246,232,160,0.92)';
-    ctx.font = '600 10px ui-monospace, Menlo, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('COLLECTOR', cx, chevY - 7);
-    ctx.restore();
-
-    // Drains: the failure mouths, marked so losing the payload never feels
-    // arbitrary.
-    if (!g.drains) return;
-    ctx.save();
-    ctx.strokeStyle = 'rgba(217,139,106,0.75)';
-    ctx.fillStyle = 'rgba(217,139,106,0.75)';
-    ctx.lineWidth = 2;
-    ctx.font = '600 8px ui-monospace, Menlo, monospace';
-    ctx.textAlign = 'center';
-    for (var k = 0; k < g.drains.length; k++) {
-      var dl = g.drains[k][0] * sx,
-        dr = (g.drains[k][1] + 1) * sx;
-      var dcx = (dl + dr) / 2;
+    // Crystal spikes, pointing up. Uneven on purpose — a regular comb reads as
+    // machinery, and this is meant to be something grown.
+    var n = 5;
+    for (var i = 0; i < n; i++) {
+      var x0 = l + (w * i) / n,
+        x1 = l + (w * (i + 1)) / n;
+      var peak = top - h * (0.34 + 0.3 * Math.abs(Math.sin(i * 2.1)));
+      var grad = ctx.createLinearGradient(0, peak, 0, bot);
+      grad.addColorStop(0, 'rgba(255,247,207,0.95)');
+      grad.addColorStop(1, 'rgba(214,190,110,0.75)');
+      ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.moveTo(dl, top - 1);
-      ctx.lineTo(dr, top - 1);
-      ctx.stroke();
-      ctx.fillText('DRAIN', dcx, top - 6);
+      ctx.moveTo(x0, bot);
+      ctx.lineTo((x0 + x1) / 2, peak);
+      ctx.lineTo(x1, bot);
+      ctx.closePath();
+      ctx.fill();
+      // A lit facet down one side gives each spike a direction.
+      ctx.fillStyle = 'rgba(255,255,255,0.16)';
+      ctx.beginPath();
+      ctx.moveTo((x0 + x1) / 2, peak);
+      ctx.lineTo(x1, bot);
+      ctx.lineTo((x0 + x1) / 2 + (x1 - x0) * 0.16, bot);
+      ctx.closePath();
+      ctx.fill();
     }
     ctx.restore();
+
+    // Motes rising out of the mouth — the clearest "this is where it goes"
+    // signal, and it costs six moving dots.
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (var m = 0; m < 6; m++) {
+      var seed = m * 97.3;
+      var t = ((tick * 0.006 + m / 6) % 1);
+      var my = top - t * h * 2.2;
+      var mx = cx + Math.sin(seed + t * 3.4) * w * 0.36;
+      var fade = (1 - t) * (0.35 + fill * 0.5);
+      ctx.fillStyle = 'rgba(255,244,190,' + fade.toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(mx, my, 1.6 - t, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawDrains(sx, sy, top, bot) {
+    var g = sim.geometry;
+    if (!g.drains) return;
+    var h = bot - top;
+
+    for (var k = 0; k < g.drains.length; k++) {
+      var l = g.drains[k][0] * sx,
+        r = (g.drains[k][1] + 1) * sx;
+      var w = r - l;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(l, top, w, h);
+      ctx.clip();
+
+      // A throat that goes properly black. No glow anywhere — this is the one
+      // thing on screen that gives nothing back.
+      var v = ctx.createLinearGradient(0, top, 0, bot);
+      v.addColorStop(0, 'rgba(24,18,14,0.9)');
+      v.addColorStop(1, 'rgba(0,0,0,1)');
+      ctx.fillStyle = v;
+      ctx.fillRect(l, top, w, h);
+
+      // Streaks falling away down the shaft: motion pointing the opposite way
+      // to the collector's motes.
+      for (var s = 0; s < 4; s++) {
+        var t = ((tick * 0.02 + s / 4) % 1);
+        var sy2 = top + t * h;
+        ctx.fillStyle = 'rgba(217,139,106,' + (0.3 * (1 - t)).toFixed(3) + ')';
+        ctx.fillRect(l + w * (0.18 + 0.2 * s), sy2, 1.5, h * 0.22);
+      }
+
+      // Teeth along the lip, pointing down.
+      var teeth = 4;
+      ctx.fillStyle = 'rgba(150,88,66,0.95)';
+      for (var i = 0; i < teeth; i++) {
+        var x0 = l + (w * i) / teeth,
+          x1 = l + (w * (i + 1)) / teeth;
+        ctx.beginPath();
+        ctx.moveTo(x0, top);
+        ctx.lineTo(x1, top);
+        ctx.lineTo((x0 + x1) / 2, top + h * 0.3);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // A thin warm rim so the mouth still reads on a dark background.
+      ctx.strokeStyle = 'rgba(196,110,80,0.85)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(l, top);
+      ctx.lineTo(r, top);
+      ctx.stroke();
+    }
   }
 
   function drawChunks(sx, sy) {
@@ -282,6 +415,7 @@
   /* ------------------------------------------------------------------- */
 
   function updateHud(s, ceiling) {
+    el.time.textContent = clock(clearTime === null ? elapsed : clearTime);
     el.depth.textContent = s.depth.toFixed(0) + ' m';
     el.pressure.textContent = s.pressure.toFixed(0);
     el.collected.textContent = s.collectionPct.toFixed(0) + '%';
@@ -293,15 +427,30 @@
     el.chunks.textContent = bodies.count();
   }
 
+  var lastBanner = '';
+
   function setBanner(kind, html) {
+    // The clear banner updates every frame as the grade climbs; rewriting the
+    // DOM each time would blow away a button mid-tap.
+    if (html === lastBanner) return;
+    lastBanner = html;
     el.banner.className = 'banner ' + kind;
     el.banner.innerHTML = html;
+
     var again = document.getElementById('again');
     if (again) again.addEventListener('click', function () { reset(); });
+    var onward = document.getElementById('onward');
+    if (onward) onward.addEventListener('click', function () { reset(seed + 1); });
   }
 
   function restartBtn() {
     return ' <button id="again" class="again">Restart level</button>';
+  }
+
+  // Offered the moment the level is passed, so clearing it is also the cue to
+  // move on — without ending a run that could still climb to a better grade.
+  function onwardBtn() {
+    return ' <button id="onward" class="again onward">Next level →</button>';
   }
 
   function checkOutcome(s, ceiling) {
@@ -317,14 +466,18 @@
      * to replay a level you have already cleared.
      */
     if (tier) {
-      passed = true;
+      if (!passed) {
+        passed = true;
+        clearTime = elapsed; // the time that counts is time to clear
+      }
       var next = nextTier(pct);
       setBanner(
         'win',
-        'CLEAR ' + stars(tier.stars) + ' — ' + pct.toFixed(0) + '% collected' +
+        'CLEAR ' + stars(tier.stars) + ' — ' + pct.toFixed(0) + '% in ' +
+          clock(clearTime) + onwardBtn() +
           (next
-            ? '<span class="hint">next: ' + next.stars + '★ at ' + next.at + '%</span>'
-            : '')
+            ? '<span class="hint">still filling — ' + next.stars + '★ at ' + next.at + '%</span>'
+            : '<span class="hint">perfect run</span>')
       );
     } else if (ceiling < WIN_PCT) {
       /*
@@ -357,7 +510,8 @@
       var t = tierFor(pct);
       setBanner(
         'win',
-        'FINAL ' + stars(t.stars) + ' — ' + pct.toFixed(0) + '% collected' + restartBtn()
+        'FINAL ' + stars(t.stars) + ' — ' + pct.toFixed(0) + '% in ' +
+          clock(clearTime) + onwardBtn() + restartBtn()
       );
     } else {
       setBanner(
@@ -367,8 +521,20 @@
     }
   }
 
-  function frame() {
+  function clock(sec) {
+    var m = Math.floor(sec / 60);
+    var r = Math.floor(sec % 60);
+    return m + ':' + (r < 10 ? '0' : '') + r;
+  }
+
+  function frame(now) {
     tick++;
+    var dt = lastFrame ? (now - lastFrame) / 1000 : 0;
+    lastFrame = now;
+    // Cap the delta so a backgrounded tab does not bank minutes at once.
+    if (dt > 0.25) dt = 0.25;
+    if (!introOpen() && outcome !== 'final') elapsed += dt;
+
     if (!introOpen()) {
       for (var i = 0; i < STEPS_PER_FRAME; i++) {
         bodies.step(1 / 60);
@@ -380,7 +546,7 @@
     var ceiling = s.released
       ? ((s.collected + s.inPlay + s.heldBySand) / s.released) * 100
       : 100;
-    draw();
+    draw(s);
     updateHud(s, ceiling);
     if (!introOpen()) checkOutcome(s, ceiling);
     requestAnimationFrame(frame);

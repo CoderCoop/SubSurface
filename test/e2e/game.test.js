@@ -101,7 +101,10 @@ test('digging the clay corridor clears the level and earns a grade', async () =>
 
   const banner = await text(page, '#banner');
   assert.match(banner, /★/, 'a clear should show a star grade');
-  assert.match(banner, /next: \d★ at \d+%/, 'and should name the next tier to aim for');
+  // Matched loosely on purpose: the claim is that the next tier is named, not
+  // the wording it is named in.
+  assert.match(banner, /\d★ at \d+%/, 'and should name the next tier to aim for');
+  assert.match(banner, /\d+:\d\d/, 'and the time it took');
 
   const pct = parseInt(await text(page, '#collected'), 10);
   assert.ok(pct >= 85, `collected ${pct}%, expected at least 85`);
@@ -163,6 +166,59 @@ test('Restart level resets the level in place', async () => {
 
   assert.strictEqual(await text(page, '#collected'), '0%');
   assert.strictEqual(await text(page, '#seedlabel'), level, 'restart keeps the same level');
+  await ctx.close();
+});
+
+test('the level clock runs while playing and stops at the clear time', async () => {
+  const { ctx, page } = await open();
+  assert.strictEqual(await text(page, '#time'), '0:00', 'the clock waits for the intro');
+  await page.waitForTimeout(1500);
+  assert.strictEqual(await text(page, '#time'), '0:00', 'and does not run behind it');
+
+  await page.locator('#start').tap();
+  await page.waitForTimeout(2500);
+  assert.notStrictEqual(await text(page, '#time'), '0:00', 'it should run once playing');
+
+  await page.locator('#labtoggle').tap();
+  await page.locator('#solve').tap();
+  const won = await until(page, async () =>
+    (await text(page, '#banner')).includes('CLEAR')
+  );
+  assert.ok(won);
+
+  // Once cleared, the clock reports time-to-clear and stops moving, even
+  // though fluid is still arriving and the grade can still climb.
+  const at = await text(page, '#time');
+  assert.match(at, /^\d+:\d\d$/);
+  await page.waitForTimeout(2500);
+  assert.strictEqual(await text(page, '#time'), at, 'the clear time should be fixed');
+  assert.ok((await text(page, '#banner')).includes(at), 'and be reported in the banner');
+  await ctx.close();
+});
+
+test('clearing a level offers a way onward', async () => {
+  const { ctx, page } = await open();
+  await page.locator('#start').tap();
+  await page.locator('#labtoggle').tap();
+  await page.locator('#solve').tap();
+  assert.ok(
+    await until(page, async () => (await text(page, '#banner')).includes('CLEAR'))
+  );
+
+  const onward = page.locator('#onward');
+  assert.ok(await onward.isVisible(), 'a cleared level should offer the next one');
+  // Teal-on-teal would be invisible; the label has to contrast with the fill.
+  const colours = await page.evaluate(() => {
+    const s = getComputedStyle(document.getElementById('onward'));
+    return { fg: s.color, bg: s.backgroundColor };
+  });
+  assert.notStrictEqual(colours.fg, colours.bg, 'the button label must be readable');
+
+  await onward.tap();
+  await page.waitForTimeout(500);
+  assert.strictEqual(await text(page, '#seedlabel'), 'level 2');
+  assert.strictEqual(await text(page, '#time'), '0:00', 'the new level starts a new clock');
+  assert.strictEqual(await text(page, '#banner'), '');
   await ctx.close();
 });
 

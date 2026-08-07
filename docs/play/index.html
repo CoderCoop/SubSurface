@@ -81,7 +81,7 @@
         color: var(--faint);
         text-transform: uppercase;
       }
-      .cell .v { font-size: 1.1rem; margin-top: 2px; }
+      .cell .v { font-size: 1rem; margin-top: 2px; }
       .cell .v.teal { color: var(--fluid); }
       .track {
         height: 3px;
@@ -166,6 +166,15 @@
         border-color: currentColor;
         color: inherit;
       }
+      /* After .again on purpose: that rule sets color:inherit, which on the
+         clear banner is teal — teal text on a teal button is invisible. */
+      button.onward {
+        background: var(--fluid);
+        color: #08201e;
+        border-color: var(--fluid);
+        font-weight: 700;
+      }
+      button.onward:hover { background: #4ce4d5; color: #08201e; }
       .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
       button {
         font-family: var(--mono);
@@ -353,6 +362,7 @@
     <div class="rig">
       <div class="hud">
         <div class="row">
+          <div class="cell"><div class="k">Time</div><div class="v" id="time">0:00</div></div>
           <div class="cell"><div class="k">Depth</div><div class="v" id="depth">0 m</div></div>
           <div class="cell"><div class="k">Pressure</div><div class="v" id="pressure">0</div></div>
           <div class="cell"><div class="k">Collected</div><div class="v teal" id="collected">0%</div></div>
