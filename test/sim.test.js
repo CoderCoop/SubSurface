@@ -106,6 +106,57 @@ test('fluid falls and pools flat on clay', () => {
   assert.ok(top >= 13, `fluid should be resting on the clay, topmost at ${top}`);
 });
 
+test('a pool on a ledge finds the edge instead of diffusing toward it', () => {
+  /*
+   * Spreading one column per step makes crossing a ledge a random walk, so the
+   * time to reach an edge grows with the SQUARE of the distance and a puddle
+   * sits there hunting for a drop it should have found at once. Fluid now
+   * looks along the surface and moves to the furthest useful cell, so this is
+   * bounded by distance rather than distance squared.
+   *
+   * Measured: 2128 steps before this rule, 263 after. The budget below is set
+   * between the two, so it fails if that regresses without pinning the exact
+   * number the tuning happens to produce.
+   */
+  const sim = blank(60, 40);
+  for (let x = 1; x < 45; x++) put(sim, x, 20, MAT.CLAY); // ledge, edge at x=44
+  for (let y = 17; y < 20; y++)
+    for (let x = 3; x < 20; x++) put(sim, x, y, MAT.WATER);
+
+  let steps = null;
+  for (let i = 1; i <= 4000 && steps === null; i++) {
+    sim.step();
+    let below = 0;
+    for (let y = 21; y < 39; y++)
+      for (let x = 1; x < 59; x++) if (sim.raw(x, y) === MAT.WATER) below++;
+    if (below > 30) steps = i;
+  }
+
+  assert.ok(steps !== null, 'the pool never reached the edge at all');
+  assert.ok(
+    steps < 800,
+    `pool took ${steps} steps to start draining; it should find the edge, not wander to it`
+  );
+  assert.ok(sim.stats().balanced);
+});
+
+test('fluid does not tunnel sideways through a wall to reach open space', () => {
+  // The sideways scan has to stop at the first obstruction, or a pool would
+  // teleport through clay into whatever cavity happens to lie beyond it.
+  const sim = blank(40, 24);
+  for (let x = 1; x < 39; x++) put(sim, x, 18, MAT.CLAY); // floor
+  for (let y = 12; y < 18; y++) put(sim, 20, y, MAT.CLAY); // dividing wall
+  for (let x = 2; x < 18; x++) put(sim, x, 17, MAT.WATER); // pool on the left
+
+  run(sim, 600);
+
+  let right = 0;
+  for (let y = 0; y < 24; y++)
+    for (let x = 21; x < 39; x++) if (sim.raw(x, y) === MAT.WATER) right++;
+  assert.strictEqual(right, 0, `${right} units got through the wall`);
+  assert.ok(sim.stats().balanced);
+});
+
 test('deep columns raise pressure, shallow puddles do not', () => {
   const deep = blank(9, 40);
   for (let y = 2; y < 32; y++) put(deep, 4, y, MAT.WATER);
