@@ -60,6 +60,22 @@
   var bctx = buf.getContext('2d');
   var img = bctx.createImageData(GRID_W, GRID_H);
 
+  /*
+   * Bloom source. Written in the same pass as the cell buffer, but carrying
+   * only the things that emit — fluid and crystal — with everything else left
+   * transparent. Blooming the composed frame instead would haze the clay and
+   * wash the whole cross-section out; this way only light blooms.
+   *
+   * The blur is the browser's own smoothing when a grid-sized buffer is
+   * scaled up to the canvas, which costs one drawImage rather than a kernel.
+   */
+  var glowBuf = document.createElement('canvas');
+  glowBuf.width = GRID_W;
+  glowBuf.height = GRID_H;
+  var gctx = glowBuf.getContext('2d');
+  var glowImg = gctx.createImageData(GRID_W, GRID_H);
+  var vignette = null;
+
   var sim, bodies, seed = 1, outcome = null, digging = false, last = null;
   var stall = 0, prev = '', tick = 0, cursor = null, passed = false;
   // Elapsed play time for the level: accrues only while the level is live,
@@ -82,6 +98,86 @@
     intro: document.getElementById('intro')
   };
 
+  /* ---------------------------------------------------------------------
+   * Particles
+   *
+   * A fixed pool in typed arrays, alive entries packed at the front and
+   * removed by swapping the last one down. Nothing is allocated while playing,
+   * so the effects never hand the collector a reason to stutter mid-drag.
+   *
+   * Positions are in grid space, not pixels, so they line up with the
+   * simulation at any canvas size.
+   * ------------------------------------------------------------------- */
+  var P_MAX = 260;
+  var pX = new Float32Array(P_MAX),
+    pY = new Float32Array(P_MAX),
+    pVX = new Float32Array(P_MAX),
+    pVY = new Float32Array(P_MAX),
+    pLife = new Float32Array(P_MAX),
+    pFull = new Float32Array(P_MAX),
+    pSize = new Float32Array(P_MAX),
+    pGrav = new Float32Array(P_MAX),
+    pR = new Uint8Array(P_MAX),
+    pG = new Uint8Array(P_MAX),
+    pB = new Uint8Array(P_MAX);
+  var pCount = 0;
+  var lastCollected = 0;
+
+  function emit(x, y, n, o) {
+    for (var k = 0; k < n && pCount < P_MAX; k++) {
+      var i = pCount++;
+      var a = Math.random() * Math.PI * 2;
+      var sp = o.speed * (0.35 + Math.random() * 0.65);
+      pX[i] = x + (Math.random() - 0.5) * (o.spread || 1);
+      pY[i] = y + (Math.random() - 0.5) * (o.spread || 1);
+      pVX[i] = Math.cos(a) * sp;
+      pVY[i] = Math.sin(a) * sp - (o.lift || 0);
+      pFull[i] = pLife[i] = o.life * (0.6 + Math.random() * 0.7);
+      pSize[i] = o.size * (0.6 + Math.random() * 0.8);
+      pGrav[i] = o.grav === undefined ? 26 : o.grav;
+      var c = o.color;
+      var j = (Math.random() - 0.5) * 26;
+      pR[i] = Math.max(0, Math.min(255, c[0] + j));
+      pG[i] = Math.max(0, Math.min(255, c[1] + j));
+      pB[i] = Math.max(0, Math.min(255, c[2] + j));
+    }
+  }
+
+  function stepParticles(dt) {
+    for (var i = 0; i < pCount; i++) {
+      pLife[i] -= dt;
+      if (pLife[i] <= 0) {
+        // Swap the last live particle down and re-test this slot.
+        var l = --pCount;
+        pX[i] = pX[l]; pY[i] = pY[l]; pVX[i] = pVX[l]; pVY[i] = pVY[l];
+        pLife[i] = pLife[l]; pFull[i] = pFull[l]; pSize[i] = pSize[l];
+        pGrav[i] = pGrav[l]; pR[i] = pR[l]; pG[i] = pG[l]; pB[i] = pB[l];
+        i--;
+        continue;
+      }
+      pVY[i] += pGrav[i] * dt;
+      pVX[i] *= 0.985;
+      pX[i] += pVX[i] * dt;
+      pY[i] += pVY[i] * dt;
+    }
+  }
+
+  function drawParticles(sx, sy) {
+    for (var i = 0; i < pCount; i++) {
+      var t = pLife[i] / pFull[i];
+      ctx.fillStyle =
+        'rgba(' + pR[i] + ',' + pG[i] + ',' + pB[i] + ',' + (t * 0.85).toFixed(3) + ')';
+      var s = pSize[i] * sx * (0.4 + t * 0.6);
+      ctx.fillRect(pX[i] * sx - s / 2, pY[i] * sy - s / 2, s, s);
+    }
+  }
+
+  var DUST = {};
+  DUST[MAT.CLAY] = [150, 92, 66];
+  DUST[MAT.SAND] = [211, 176, 124];
+  DUST[MAT.WETSAND] = [130, 100, 66];
+  DUST[MAT.FRACTURED] = [120, 138, 152];
+
   // Materials that light from above like ground rather than like fluid.
   var SOLID = {};
   SOLID[MAT.CLAY] = SOLID[MAT.SAND] = SOLID[MAT.WETSAND] = 1;
@@ -96,6 +192,8 @@
     elapsed = 0;
     clearTime = null;
     lastFrame = 0;
+    lastCollected = 0;
+    pCount = 0;
     stall = 0;
     prev = '';
     el.banner.className = 'banner';
@@ -114,6 +212,7 @@
    * ------------------------------------------------------------------- */
   function draw(s) {
     var d = img.data,
+      gd = glowImg.data,
       cells = sim.cells,
       tint = sim.tint,
       head = sim.head,
@@ -196,12 +295,23 @@
       }
 
       var o = i * 4;
-      d[o] = r < 0 ? 0 : r > 255 ? 255 : r;
-      d[o + 1] = g < 0 ? 0 : g > 255 ? 255 : g;
-      d[o + 2] = b < 0 ? 0 : b > 255 ? 255 : b;
+      var rr = r < 0 ? 0 : r > 255 ? 255 : r;
+      var gg = g < 0 ? 0 : g > 255 ? 255 : g;
+      var bb = b < 0 ? 0 : b > 255 ? 255 : b;
+      d[o] = rr;
+      d[o + 1] = gg;
+      d[o + 2] = bb;
       d[o + 3] = 255;
+
+      // Only emitters go into the bloom buffer.
+      var lit = m === MAT.WATER || m === MAT.COLLECTOR;
+      gd[o] = lit ? rr : 0;
+      gd[o + 1] = lit ? gg : 0;
+      gd[o + 2] = lit ? bb : 0;
+      gd[o + 3] = lit ? 255 : 0;
     }
     bctx.putImageData(img, 0, 0);
+    gctx.putImageData(glowImg, 0, 0);
 
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, display.width, display.height);
@@ -212,7 +322,47 @@
 
     drawTargets(sx, sy, s);
     drawChunks(sx, sy);
+    drawParticles(sx, sy);
+    drawBloom();
+    drawVignette();
+    // The cursor sits above the grade, so the tool stays readable over glow.
     drawCursor(sx, sy);
+  }
+
+  // Two additive passes at different scales: a tight one for the core and a
+  // wide soft one for the halo, which reads far better than a single blur.
+  function drawBloom() {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.imageSmoothingEnabled = true;
+    ctx.globalAlpha = 0.34;
+    ctx.drawImage(glowBuf, 0, 0, display.width, display.height);
+    ctx.globalAlpha = 0.2;
+    var o = display.width * 0.035;
+    ctx.drawImage(
+      glowBuf,
+      -o,
+      -o,
+      display.width + o * 2,
+      display.height + o * 2
+    );
+    ctx.restore();
+  }
+
+  // Built once and reused; a gradient object per frame is pure waste.
+  function drawVignette() {
+    if (!vignette) {
+      var cx = display.width / 2,
+        cy = display.height / 2;
+      vignette = ctx.createRadialGradient(
+        cx, cy, Math.min(cx, cy) * 0.55,
+        cx, cy, Math.max(cx, cy) * 1.12
+      );
+      vignette.addColorStop(0, 'rgba(0,0,0,0)');
+      vignette.addColorStop(1, 'rgba(0,0,0,0.5)');
+    }
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, display.width, display.height);
   }
 
   /*
@@ -541,11 +691,27 @@
         sim.step();
       }
     }
+    stepParticles(dt);
     var s = sim.stats();
     // Best score still reachable: everything the drains have not taken.
     var ceiling = s.released
       ? ((s.collected + s.inPlay + s.heldBySand) / s.released) * 100
       : 100;
+    // Splash on arrival: the moment fluid is banked is the moment worth
+    // marking, and the counter moving is exactly that moment.
+    var gained = s.collected - lastCollected;
+    lastCollected = s.collected;
+    if (gained > 0 && sim.geometry) {
+      var gm = sim.geometry;
+      emit(
+        (gm.basinL + gm.basinR) / 2,
+        gm.floorY,
+        Math.min(4, 1 + (gained >> 3)),
+        { color: [140, 244, 232], speed: 9, life: 0.55, size: 0.9,
+          spread: gm.basinR - gm.basinL, lift: 13, grav: 30 }
+      );
+    }
+
     draw(s);
     updateHud(s, ceiling);
     if (!introOpen()) checkOutcome(s, ceiling);
@@ -628,13 +794,31 @@
     if (r.removed || r.shattered.length) bodies.markTerrainDirty();
   }
 
+  // Spray from the cut, tinted by whatever the shovel actually took, so
+  // digging clay feels different from digging gravel without any sound yet.
+  function digDust(x, y, r) {
+    if (!r.removed && !r.shattered.length) return;
+    var mat = r.grit ? MAT.SAND : MAT.CLAY;
+    if (r.shattered.length) mat = MAT.FRACTURED;
+    emit(x, y, r.shattered.length ? 7 : 3, {
+      color: DUST[mat],
+      speed: r.shattered.length ? 20 : 11,
+      life: 0.5,
+      size: 1.1,
+      spread: DIG_RADIUS,
+      lift: 4
+    });
+  }
+
   display.addEventListener('pointerdown', function (ev) {
     if (introOpen()) return;
     ev.preventDefault();
     display.setPointerCapture(ev.pointerId);
     digging = true;
     last = cursor = toGrid(ev);
-    shatter(sim.dig(last.x, last.y, DIG_RADIUS));
+    var r0 = sim.dig(last.x, last.y, DIG_RADIUS);
+    shatter(r0);
+    digDust(last.x, last.y, r0);
   });
 
   display.addEventListener('pointermove', function (ev) {
@@ -644,7 +828,9 @@
     if (!digging) return;
     ev.preventDefault();
     // Interpolate, so a fast swipe cuts a continuous tunnel.
-    shatter(sim.digLine(last.x, last.y, p.x, p.y, DIG_RADIUS));
+    var r1 = sim.digLine(last.x, last.y, p.x, p.y, DIG_RADIUS);
+    shatter(r1);
+    digDust(p.x, p.y, r1);
     last = p;
   });
 

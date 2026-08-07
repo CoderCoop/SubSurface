@@ -65,7 +65,18 @@
         font-weight: 400;
         margin: 0;
       }
-      .rig { width: min(94vw, 380px); }
+      /*
+       * Size the whole rig from the space actually available, not from the
+       * screen width. The board is 3:5, so on a phone a width-driven canvas
+       * grows tall enough to push the controls below the fold — and a Restart
+       * button you cannot see is a Restart button that does not exist.
+       *
+       * The reserve covers the title, HUD, sub-bar, banner, controls and gaps.
+       */
+      .rig {
+        width: min(94vw, 380px, calc((100dvh - 300px) * 120 / 200));
+        min-width: 220px;
+      }
       .hud {
         border: 1px solid var(--line);
         background: var(--panel);
