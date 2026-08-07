@@ -565,11 +565,72 @@
    * §4.3, which is not written yet — the band list is the same authored data,
    * expressed in code instead of pixels.
    */
+  /*
+   * Difficulty.
+   *
+   * Every level used to be the same cross-section with different noise, so
+   * level 40 played exactly like level 1. This turns the level number into a
+   * curve following the stage bands in spec §5: clay, then sand, then fractured
+   * rock, then all of it together.
+   *
+   * Three things advance, and they are deliberately separate:
+   *
+   *   materials  arrive one at a time, so each is learned on its own before it
+   *              has to be juggled with the last one
+   *   tolerance  the apron of safe bedrock around the collector shrinks, so a
+   *              near miss goes from survivable to expensive to fatal
+   *   geometry   the corridor narrows and stops being in the same place, so the
+   *              route has to be read rather than remembered
+   *
+   * Everything is expressed as a fraction and clamped, so the far end of the
+   * curve is hard but still has a corridor wide enough to cut and a basin wide
+   * enough to hit. A level that cannot be solved is not difficulty.
+   */
+  function difficultyFor(level) {
+    var n = Math.max(1, level | 0);
+    // 0 at the start of a band, approaching 1 by its end.
+    var within = function (from, span) {
+      return Math.max(0, Math.min(1, (n - from) / span));
+    };
+    var late = within(31, 30); // the open-ended band beyond stage 30
+
+    /*
+     * Where the corridor sits. Through the teaching levels it is pinned to the
+     * right, so the lesson is the material and not the search. From 16 it
+     * starts to wander, by an amount that grows and a direction that is a hash
+     * of the level number — same level, same layout, every time.
+     */
+    var jitter = ((Math.sin(n * 12.9898) * 43758.5453) % 1 + 1) % 1;
+
+    return {
+      level: n,
+      sand: n >= 11,
+      fractured: n >= 21,
+      // The clay corridor: from generous down to a genuinely tight lane.
+      corridor: 0.38 - 0.16 * within(11, 20) - 0.07 * late,
+      // How far left of the right wall the corridor may sit, 0 = pinned right.
+      wander: within(16, 15) * jitter,
+      // Sand deepens through its band and keeps creeping afterwards.
+      sandDepth: 0.14 + 0.06 * within(11, 12) + 0.05 * late,
+      // Fractured slab thickens once it appears.
+      fracDepth: 0.08 + 0.05 * within(21, 12) + 0.03 * late,
+      // Basin width as a share of the corridor, so it always fits inside it
+      // and tightens twice over: a smaller share of a narrower corridor.
+      basin: 0.66 - 0.18 * within(6, 24) - 0.08 * late,
+      // Bedrock apron flanking the basin — the margin for a near miss. Land
+      // on it and the fluid still slides home; miss it and the floor is drain.
+      apron: 0.11 - 0.06 * within(6, 24) - 0.02 * late
+    };
+  }
+
   function buildLevel(opts) {
     opts = opts || {};
     var w = opts.w || 120,
       h = opts.h || 200;
+    var level = opts.level === undefined ? opts.seed : opts.level;
+    var D = difficultyFor(level === undefined ? 1 : level);
     var sim = new Sim(w, h, opts.seed === undefined ? 1 : opts.seed);
+    sim.difficulty = D;
     var R = mulberry32((opts.seed === undefined ? 1 : opts.seed) * 31 + 7);
     var WALL = 3;
     var band = function (f) {
@@ -633,23 +694,41 @@
       for (x = WALL; x < w - WALL; x++) sim.set(x, y, CLAY);
 
     /*
-     * The sand band covers the left of the level only, leaving a clay
-     * corridor down the right. That asymmetry is the puzzle: a shaft cut
-     * through sand does not stay a shaft. The band slumps into it and drains
-     * away like an hourglass, burying whatever is beneath. The corridor is
-     * the route; the sand is the trap that looks like a shortcut.
+     * The corridor: a lane of clay running the full depth of the level, with
+     * the sand band filling the rock either side of it. That asymmetry is the
+     * puzzle — a shaft cut through sand does not stay a shaft. The band slumps
+     * into it and drains away like an hourglass, burying whatever is beneath.
+     * The corridor is the route; the sand is the trap that looks like a
+     * shortcut.
+     *
+     * Early on the corridor hugs the right wall, so the lesson is the material.
+     * Later it wanders, and the sand closes in behind it on both sides.
      */
-    var sandRight = col(0.62);
-    if (opts.sand !== false)
+    var wallF = WALL / w + 0.01;
+    var rightmost = 1 - wallF - D.corridor / 2;
+    var leftmost = Math.max(0.3 + D.corridor / 2, wallF + D.corridor / 2);
+    var corridorC = rightmost - D.wander * Math.max(0, rightmost - leftmost);
+    var corridorL = col(corridorC - D.corridor / 2),
+      corridorR = col(corridorC + D.corridor / 2);
+
+    var hasSand = opts.sand !== false && D.sand;
+    if (hasSand) {
+      sandBot = sandTop + Math.round(D.sandDepth * h);
       for (y = sandTop; y < sandBot; y++)
-        for (x = WALL; x < sandRight; x++) sim.set(x, y, SAND);
+        for (x = WALL; x < w - WALL; x++)
+          if (x < corridorL || x >= corridorR) sim.set(x, y, SAND);
+    }
+    // Kept for callers that predate the corridor moving; it is the near edge
+    // of the sand, which is what they actually wanted.
+    var sandRight = corridorL;
 
     // A bedrock rib on the left, so the far-left wall is not a free ride
     // around the band.
     var ribY = band(0.66),
       ribH = Math.max(2, Math.round(0.03 * h));
     for (y = ribY; y < ribY + ribH; y++)
-      for (x = WALL; x < col(0.3); x++) sim.set(x, y, BEDROCK);
+      for (x = WALL; x < Math.min(col(0.3), corridorL); x++)
+        sim.set(x, y, BEDROCK);
 
     /*
      * A fractured slab across the clay corridor, pre-scored into chunks. It
@@ -659,10 +738,12 @@
      * carefully, act as a valve.
      */
     var fracTop = band(0.7),
-      fracBot = band(0.78),
-      fracL = col(0.62),
-      fracR = w - WALL;
-    if (opts.fractured !== false) {
+      fracBot = fracTop + Math.round(D.fracDepth * h),
+      // A margin either side, so the slab cannot be sidestepped by hugging
+      // the corridor wall — it spans the route and then some.
+      fracL = Math.max(WALL, corridorL - col(0.05)),
+      fracR = Math.min(w - WALL, corridorR + col(0.05));
+    if (opts.fractured !== false && D.fractured) {
       var CH = Math.max(3, Math.round(0.035 * w)); // chunk edge, in cells
       for (y = fracTop; y < fracBot; y++)
         for (x = fracL; x < fracR; x++) {
@@ -694,6 +775,10 @@
       var px = pockets[p][0],
         py = pockets[p][1],
         pr = pockets[p][2];
+      // A pocket sitting in the corridor would put sand on the safe route
+      // before the sand band has been taught. Drop it instead of moving it —
+      // the pockets are scenery, and the corridor is the promise.
+      if (px + pr >= corridorL && px - pr < corridorR) continue;
       for (y = py - pr; y <= py + pr; y++)
         for (x = px - pr; x <= px + pr; x++) {
           if (x < WALL || x >= w - WALL || y < 0 || y >= h) continue;
@@ -714,18 +799,43 @@
     for (y = floorY; y < h - 2; y++)
       for (x = WALL; x < w - WALL; x++) sim.set(x, y, BEDROCK);
 
-    // The basin sits under the clay corridor, and the drains under the sand.
-    // Cut where the digging is easy and the payload runs straight out.
-    var basinL = col(0.68),
-      basinR = col(0.88),
+    /*
+     * The basin sits under the corridor, so the route always ends somewhere.
+     * Flanking it is an apron of bedrock: land the column on the apron and the
+     * fluid still runs home, so a near miss costs time rather than the level.
+     * Everything beyond the apron is drain.
+     *
+     * The apron is the difficulty dial that matters most. Early levels give a
+     * wide one and forgive a sloppy aim; late levels shave it to a few cells,
+     * and a column that lands off the crystal is simply gone.
+     */
+    var basinHalf = Math.max(3, Math.round((D.basin * D.corridor * w) / 2));
+    var basinC = Math.round(corridorC * w);
+    var basinL = Math.max(WALL + 1, basinC - basinHalf),
+      basinR = Math.min(w - WALL - 2, basinC + basinHalf),
       basinBot = Math.min(h - 3, floorY + Math.round(0.05 * h));
     for (y = floorY; y <= basinBot; y++)
       for (x = basinL; x <= basinR; x++) sim.set(x, y, COLLECTOR);
 
-    var drains = [
-      [col(0.06), col(0.16)],
-      [col(0.4), col(0.52)]
-    ];
+    /*
+     * The drains are whatever floor is left. Cut into mouths of bounded width
+     * with bedrock ribs between them, because one continuous chasm half the
+     * level wide reads as a background, not as a hazard — and the ribs change
+     * nothing: fluid landing on one still runs into a drain either way.
+     */
+    var apron = Math.max(2, Math.round(D.apron * w));
+    var mouth = Math.max(4, Math.round(0.12 * w)),
+      rib = Math.max(2, Math.round(0.02 * w));
+    var drains = [];
+    var cut = function (from, to) {
+      for (var a = from; a <= to; a += mouth + rib) {
+        var b = Math.min(to, a + mouth - 1);
+        if (b - a < 2) break; // too narrow to read as a mouth
+        drains.push([a, b]);
+      }
+    };
+    cut(WALL, basinL - apron - 1);
+    cut(basinR + apron + 1, w - WALL - 1);
     for (var dI = 0; dI < drains.length; dI++)
       for (y = floorY; y < h - 2; y++)
         for (x = drains[dI][0]; x <= drains[dI][1]; x++) sim.set(x, y, DRAIN);
@@ -746,6 +856,9 @@
       sandTop: sandTop,
       sandBot: sandBot,
       sandRight: sandRight,
+      corridorL: corridorL,
+      corridorR: corridorR,
+      apron: apron,
       cavernTop: cavernTop,
       floorY: floorY,
       basinL: basinL,
@@ -753,7 +866,10 @@
       basinBot: basinBot,
       drains: drains,
       centreX: Math.round(w / 2),
-      routeX: col(0.78), // down the clay corridor, into the basin
+      // Down the clay corridor and into the basin, wherever it has drifted to.
+      routeX: Math.round((basinL + basinR) / 2),
+      level: D.level,
+      difficulty: D,
       fracTop: fracTop,
       fracBot: fracBot,
       fracL: fracL
@@ -776,6 +892,7 @@
     NAMES: NAMES,
     COLORS: COLORS,
     buildLevel: buildLevel,
+    difficultyFor: difficultyFor,
     carveIdealChannel: carveIdealChannel,
     mulberry32: mulberry32
   };

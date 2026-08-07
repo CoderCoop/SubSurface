@@ -36,20 +36,28 @@
         --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
       }
       * { box-sizing: border-box; }
+      /*
+       * The game owns the window.
+       *
+       * Everything is one fixed, non-scrolling viewport: the board takes all
+       * the room that is left after the chrome, and the chrome is sized to the
+       * text in it rather than to a guessed reserve. Two arrangements:
+       *
+       *   tall screens  HUD above, deck below, board filling the middle
+       *   wide screens  board at full height, HUD and deck as side rails —
+       *                 otherwise a 3:5 board on a 16:9 monitor is a stripe
+       *                 with two empty margins
+       *
+       * The board keeps its aspect ratio in both. The level is the same level
+       * on every device; only the space around it changes.
+       */
+      html, body { height: 100%; }
       body {
         margin: 0;
         background: var(--bg);
         color: var(--ink);
         font-family: var(--mono);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        min-height: 100vh;
-        /* dvh tracks the shrinking viewport when mobile browser chrome hides */
-        min-height: 100dvh;
-        padding: calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
-          calc(12px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
-        gap: 12px;
+        overflow: hidden;
         /* Digging is a drag gesture; don't let it scroll the page. */
         touch-action: none;
         overscroll-behavior: none;
@@ -57,32 +65,47 @@
         user-select: none;
         -webkit-tap-highlight-color: transparent;
       }
+      .app {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: calc(8px + env(safe-area-inset-top)) calc(8px + env(safe-area-inset-right))
+          calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left));
+      }
+      /* The board: all remaining space, aspect kept, centred in it. */
+      .stage {
+        position: relative;
+        flex: 1 1 auto;
+        min-height: 0;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .rail {
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
       h1 {
-        font-size: 0.78rem;
+        font-size: 0.7rem;
         letter-spacing: 0.18em;
         text-transform: uppercase;
         color: var(--faint);
         font-weight: 400;
         margin: 0;
-      }
-      /*
-       * Size the whole rig from the space actually available, not from the
-       * screen width. The board is 3:5, so on a phone a width-driven canvas
-       * grows tall enough to push the controls below the fold — and a Restart
-       * button you cannot see is a Restart button that does not exist.
-       *
-       * The reserve covers the title, HUD, sub-bar, banner, controls and gaps.
-       */
-      .rig {
-        width: min(94vw, 380px, calc((100dvh - 300px) * 120 / 200));
-        min-width: 220px;
+        text-align: center;
       }
       .hud {
         border: 1px solid var(--line);
         background: var(--panel);
-        border-radius: 6px 6px 0 0;
-        border-bottom: none;
-        padding: 10px 14px 12px;
+        border-radius: 6px;
+        padding: 8px 12px 10px;
       }
       .row { display: flex; justify-content: space-between; gap: 10px; }
       .cell { flex: 1; }
@@ -125,10 +148,15 @@
       .mark.pass { background: var(--sand); }
       canvas {
         display: block;
-        width: 100%;
-        height: auto;
+        /* The exact fit is set in script, which knows the stage box; this is
+           the pre-script fallback and the ceiling it works within. */
+        max-width: 100%;
+        max-height: 100%;
+        height: 100%;
+        width: auto;
         aspect-ratio: 120 / 200;
         border: 1px solid var(--line);
+        border-radius: 6px;
         background: #17130f;
         cursor: crosshair;
         touch-action: none;
@@ -136,20 +164,21 @@
       .sub {
         display: flex;
         justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
         border: 1px solid var(--line);
-        border-top: none;
-        border-radius: 0 0 6px 6px;
+        border-radius: 6px;
         background: var(--panel);
-        padding: 8px 14px;
-        font-size: 0.62rem;
+        padding: 7px 12px;
+        font-size: 0.6rem;
         letter-spacing: 0.1em;
         color: var(--faint);
         text-transform: uppercase;
       }
       .sub b { color: var(--dim); font-weight: 400; }
       .banner {
-        min-height: 24px;
-        font-size: 0.72rem;
+        min-height: 22px;
+        font-size: 0.7rem;
         letter-spacing: 0.1em;
         display: flex;
         align-items: center;
@@ -157,8 +186,8 @@
         flex-wrap: wrap;
         gap: 8px;
         text-align: center;
-        max-width: min(94vw, 420px);
       }
+      .banner:empty { display: none; }
       .banner.win { color: var(--fluid); }
       .banner.fail { color: #d98b6a; }
       .stars { font-size: 0.95rem; letter-spacing: 0.06em; color: var(--sand); }
@@ -200,6 +229,14 @@
         cursor: pointer;
       }
       button:hover { border-color: var(--fluid); color: var(--fluid); }
+      /* A level you have not unlocked yet: still there, plainly not offered. */
+      button:disabled,
+      button:disabled:hover {
+        opacity: 0.4;
+        cursor: not-allowed;
+        border-color: var(--line);
+        color: var(--faint);
+      }
       button.primary {
         background: var(--fluid);
         color: #08201e;
@@ -216,16 +253,28 @@
         font-size: 0.62rem;
         padding: 2px 6px;
       }
+      .labtoggle:hover { background: none; }
+      /*
+       * Floating over the board rather than in the flow: opening a debug panel
+       * must neither resize the board underneath it nor cover the controls,
+       * which is why it is anchored inside the stage and not to the window.
+       */
       .lab {
+        position: absolute;
+        z-index: 6;
+        left: 50%;
+        bottom: 10px;
+        transform: translateX(-50%);
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         justify-content: center;
         gap: 8px;
-        max-width: min(94vw, 380px);
+        width: min(92vw, 380px);
         border: 1px solid var(--line);
         border-radius: 6px;
         background: var(--panel);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
         padding: 12px;
       }
       /* a class rule with display beats the UA [hidden] rule, so restate it */
@@ -358,76 +407,105 @@
       .installhint[hidden] { display: none; }
       .installhint b { color: var(--dim); font-weight: 600; }
       .note {
-        max-width: 380px;
-        font-size: 0.68rem;
-        line-height: 1.6;
+        margin: 14px 0 0;
+        font-size: 0.62rem;
+        line-height: 1.5;
         color: var(--faint);
         text-align: center;
         font-family: system-ui, sans-serif;
       }
+
+      /*
+       * Wide screens: rails either side of a full-height board. 340px is wide
+       * enough for the HUD row to stay on one line and narrow enough to leave
+       * the board the bulk of the window.
+       */
+      @media (min-aspect-ratio: 1 / 1) and (min-width: 720px) {
+        .app { flex-direction: row; align-items: stretch; gap: 12px; }
+        .rail { width: 340px; justify-content: center; }
+        .rail.deck { order: 2; }
+        .stage { order: 1; }
+        .controls { flex-direction: column; align-items: stretch; }
+        .controls button { width: 100%; }
+      }
+      /*
+       * Narrow screens have no vertical budget for a title bar — every row of
+       * chrome comes straight off the board. The name is on the title card.
+       */
+      @media (max-width: 720px) {
+        h1 { display: none; }
+      }
+      /* Very short windows: drop what is diagnostic, keep what is played. */
+      @media (max-height: 560px) {
+        h1 { display: none; }
+        .sub { display: none; }
+      }
     </style>
   </head>
   <body>
-    <h1>Subsurface — early build</h1>
-
-    <div class="rig">
-      <div class="hud">
-        <div class="row">
-          <div class="cell"><div class="k">Time</div><div class="v" id="time">0:00</div></div>
-          <div class="cell"><div class="k">Depth</div><div class="v" id="depth">0 m</div></div>
-          <div class="cell"><div class="k">Pressure</div><div class="v" id="pressure">0</div></div>
-          <div class="cell"><div class="k">Collected</div><div class="v teal" id="collected">0%</div></div>
-        </div>
-        <!-- Two bars in one track: the pale one is the ceiling still
-             reachable, the bright one is what has actually arrived. When the
-             ceiling drops past the 85% mark the level is lost. -->
-        <div class="track">
-          <div id="ceiling"></div>
-          <div id="bar"></div>
-          <i class="mark pass" style="left: 85%"></i>
-          <i class="mark" style="left: 92%"></i>
-          <i class="mark" style="left: 97%"></i>
+    <div class="app">
+      <div class="rail">
+        <h1>Subsurface — early build</h1>
+        <div class="hud">
+          <div class="row">
+            <div class="cell"><div class="k">Time</div><div class="v" id="time">0:00</div></div>
+            <div class="cell"><div class="k">Depth</div><div class="v" id="depth">0 m</div></div>
+            <div class="cell"><div class="k">Pressure</div><div class="v" id="pressure">0</div></div>
+            <div class="cell"><div class="k">Collected</div><div class="v teal" id="collected">0%</div></div>
+          </div>
+          <!-- Two bars in one track: the pale one is the ceiling still
+               reachable, the bright one is what has actually arrived. When the
+               ceiling drops past the 85% mark the level is lost. -->
+          <div class="track">
+            <div id="ceiling"></div>
+            <div id="bar"></div>
+            <i class="mark pass" style="left: 85%"></i>
+            <i class="mark" style="left: 92%"></i>
+            <i class="mark" style="left: 97%"></i>
+          </div>
         </div>
       </div>
 
-      <canvas id="view" width="480" height="800"></canvas>
+      <div class="stage">
+        <canvas id="view" width="480" height="800"></canvas>
 
-      <div class="sub">
-        <span>In play <b id="inplay">0</b></span>
-        <span>Held <b id="held">0</b></span>
-        <span>Drained <b id="lost">0</b></span>
-        <span>Chunks <b id="chunks">0</b></span>
-        <span id="seedlabel">level 1</span>
+        <div class="lab" id="lab" hidden>
+          <label for="levelnum">Jump to level</label>
+          <input id="levelnum" type="number" min="1" step="1" value="1" inputmode="numeric" />
+          <button id="go">Go</button>
+          <button id="solve">Show reference cut</button>
+          <p>
+            Levels are generated from their number, so every one already exists
+            whether or not you have unlocked it. This is the only way past the
+            unlock gate. The reference cut digs the intended route for you.
+          </p>
+        </div>
+      </div>
+
+      <div class="rail deck">
+        <div class="sub">
+          <span>In play <b id="inplay">0</b></span>
+          <span>Held <b id="held">0</b></span>
+          <span>Drained <b id="lost">0</b></span>
+          <span>Chunks <b id="chunks">0</b></span>
+          <span id="seedlabel">level 1</span>
+        </div>
+
+        <div class="banner" id="banner"></div>
+
+        <div class="controls">
+          <button id="reset" class="primary">Restart level</button>
+          <button id="next" disabled>Next level</button>
+          <button id="help">How to play</button>
+        </div>
+
+        <button id="labtoggle" class="labtoggle" aria-expanded="false">
+          Experimental ▾
+        </button>
+
       </div>
     </div>
 
-    <div class="banner" id="banner"></div>
-
-    <div class="controls">
-      <button id="reset" class="primary">Restart level</button>
-      <button id="next">Next level</button>
-      <button id="help">How to play</button>
-    </div>
-
-    <button id="labtoggle" class="labtoggle" aria-expanded="false">
-      Experimental ▾
-    </button>
-    <div class="lab" id="lab" hidden>
-      <label for="levelnum">Jump to level</label>
-      <input id="levelnum" type="number" min="1" step="1" value="1" inputmode="numeric" />
-      <button id="go">Go</button>
-      <button id="solve">Show reference cut</button>
-      <p>
-        Levels are generated from their number, so every one already exists and
-        none are locked. The reference cut digs the intended route for you.
-      </p>
-    </div>
-
-    <p class="note">
-      This is an early build — raw grid, no art pass, no sound. Installable and
-      playable offline.
-      <a href="../" style="color: var(--fluid)">About the project</a>
-    </p>
 
     <!-- ============================ intro ============================ -->
     <div class="intro" id="intro">
@@ -455,6 +533,11 @@
             <b>Miss it and the drains take the payload.</b> They sit either side
             of the collector, and anything reaching them is gone for good.
           </li>
+          <li>
+            <b>Clearing a level unlocks the next one.</b> They get harder in
+            order: clay first, then sand, then fractured rock — and the ground
+            you can afford to miss by shrinks the whole way down.
+          </li>
         </ol>
 
         <div class="mats">
@@ -472,6 +555,11 @@
         <button id="install" class="install" hidden>Install app</button>
         <p id="ioshint" class="installhint" hidden>
           To install: tap <b>Share</b>, then <b>Add to Home Screen</b>.
+        </p>
+
+        <p class="note">
+          Early build — no art pass, no sound. Installable and playable offline.
+          <a href="../" style="color: var(--fluid)">About the project</a>
         </p>
       </div>
     </div>

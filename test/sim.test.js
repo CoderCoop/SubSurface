@@ -11,7 +11,13 @@ const { Sim, MAT, buildLevel, carveIdealChannel } = require('../docs/play/sim.js
  * and make every level here unsolvable for reasons that have nothing to do
  * with the rules under test. bodies.test.js covers it with that layer active.
  */
-const level = (opts) => buildLevel(Object.assign({ fractured: false }, opts));
+const build = (opts) => buildLevel(Object.assign({ fractured: false }, opts));
+
+/*
+ * A stage in the sand band. Levels 1–10 are clay only by design, so any test
+ * whose subject is the sand band has to ask for a level that has one.
+ */
+const SANDY = 15;
 
 // A bare grid with a bedrock shell and nothing inside, for unit-level rules.
 function blank(w, h, seed) {
@@ -48,7 +54,7 @@ function run(sim, steps) {
 // ---------------------------------------------------------------------------
 
 test('conservation holds every step in a level with sand and a channel', () => {
-  const sim = carveIdealChannel(level({ w: 90, h: 150, seed: 7 }));
+  const sim = carveIdealChannel(build({ w: 90, h: 150, seed: 7 }));
   assert.ok(sim.released > 0, 'level should release some fluid');
 
   for (let i = 0; i < 900; i++) {
@@ -63,7 +69,7 @@ test('conservation holds every step in a level with sand and a channel', () => {
 });
 
 test('conservation holds with no digging at all', () => {
-  const sim = level({ w: 60, h: 100, seed: 3 });
+  const sim = build({ w: 60, h: 100, seed: 3 });
   const s = run(sim, 300);
   assert.ok(s.balanced);
   assert.strictEqual(s.collected, 0, 'sealed level collects nothing');
@@ -325,7 +331,7 @@ test('a swipe leaves a continuous tunnel, not a dotted line', () => {
 });
 
 test('digging is irreversible — nothing ever refills', () => {
-  const sim = level({ w: 60, h: 100, seed: 5 });
+  const sim = build({ w: 60, h: 100, seed: 5 });
   const g = sim.geometry;
   sim.digLine(g.centreX, g.sealTop, g.centreX, g.cavernTop, 3);
 
@@ -347,7 +353,7 @@ test('digging is irreversible — nothing ever refills', () => {
 // ---------------------------------------------------------------------------
 
 test('the reference channel clears the 85% win threshold', () => {
-  const sim = carveIdealChannel(level({ w: 90, h: 150, seed: 7 }));
+  const sim = carveIdealChannel(build({ w: 90, h: 150, seed: 7 }));
   // A wide reservoir draining through a narrow shaft takes a while — the
   // fluid is viscous by design, so give it time to finish rather than
   // reading a percentage off a level that is still emptying.
@@ -361,7 +367,7 @@ test('the reference channel clears the 85% win threshold', () => {
 });
 
 test('a shaft cut through the sand band fails', () => {
-  const sim = level({ w: 90, h: 150, seed: 7 });
+  const sim = build({ w: 90, h: 150, seed: 7, level: SANDY });
   const g = sim.geometry;
   // Straight down the middle, through the sand rather than around it.
   sim.digLine(g.centreX, g.sealTop - 1, g.centreX, g.floorY - 1, 3);
@@ -380,7 +386,7 @@ test('a shaft cut through the sand band fails', () => {
 });
 
 test('the sand band collapses into a shaft cut through it', () => {
-  const sim = level({ w: 90, h: 150, seed: 7 });
+  const sim = build({ w: 90, h: 150, seed: 7, level: SANDY });
   const g = sim.geometry;
   sim.digLine(g.centreX, g.sandTop - 4, g.centreX, g.sandBot + 4, 3);
   // Count after the cut: digging destroys grains, so the conservation claim
@@ -408,7 +414,86 @@ test('the sand band collapses into a shaft cut through it', () => {
 });
 
 test('runs are deterministic for a given seed', () => {
-  const a = run(carveIdealChannel(level({ w: 60, h: 100, seed: 11 })), 500);
-  const b = run(carveIdealChannel(level({ w: 60, h: 100, seed: 11 })), 500);
+  const a = run(carveIdealChannel(build({ w: 60, h: 100, seed: 11 })), 500);
+  const b = run(carveIdealChannel(build({ w: 60, h: 100, seed: 11 })), 500);
   assert.deepStrictEqual(a, b);
+});
+
+// ---------------------------------------------------------------------------
+// Progression — later levels have to be different levels, and still solvable
+// ---------------------------------------------------------------------------
+
+const { difficultyFor } = require('../docs/play/sim.js');
+
+test('materials are introduced one band at a time', () => {
+  // Spec §5: clay 1–10, sand 11–20, fractured rock 21–30, everything after.
+  assert.ok(!difficultyFor(1).sand, 'the first levels are clay only');
+  assert.ok(!difficultyFor(10).sand);
+  assert.ok(difficultyFor(11).sand, 'sand arrives at 11');
+  assert.ok(!difficultyFor(20).fractured, 'and has the band to itself');
+  assert.ok(difficultyFor(21).fractured, 'fractured rock arrives at 21');
+  assert.ok(difficultyFor(40).sand && difficultyFor(40).fractured);
+});
+
+test('the level gets tighter as the number goes up, and never degenerate', () => {
+  let prevCorridor = Infinity,
+    prevApron = Infinity;
+  for (const n of [1, 10, 20, 30, 45, 60, 100, 500]) {
+    const D = difficultyFor(n);
+    assert.ok(D.corridor <= prevCorridor + 1e-9, `corridor widened at ${n}`);
+    assert.ok(D.apron <= prevApron + 1e-9, `apron widened at ${n}`);
+    prevCorridor = D.corridor;
+    prevApron = D.apron;
+    // The far end has to stay playable: a lane you can cut and a target you
+    // can hit. Difficulty that removes the solution is not difficulty.
+    assert.ok(D.corridor > 0.1, `corridor collapsed to ${D.corridor} at ${n}`);
+    assert.ok(D.basin > 0.3, `basin collapsed to ${D.basin} at ${n}`);
+    assert.ok(D.apron > 0, `apron collapsed at ${n}`);
+  }
+});
+
+test('levels are actually different from one another', () => {
+  const shape = (n) => {
+    const g = build({ w: 90, h: 150, seed: n, level: n }).geometry;
+    return [g.corridorL, g.corridorR, g.basinL, g.basinR, g.apron].join(',');
+  };
+  const seen = new Set([1, 15, 25, 35, 50, 80].map(shape));
+  assert.ok(seen.size >= 5, `expected distinct layouts, got ${seen.size}`);
+  // But the same level twice has to build the same, or nothing is learnable.
+  assert.strictEqual(shape(37), shape(37));
+});
+
+test('every band still has a reference solution', () => {
+  // One straight cut down the corridor into the basin has to clear the bar at
+  // any level, or the curve has generated a level nobody can beat. Fractured
+  // rock is left out for the reason at the top of this file.
+  for (const n of [1, 12, 24, 33, 48, 90]) {
+    const sim = carveIdealChannel(build({ w: 90, h: 150, seed: n, level: n }));
+    const s = run(sim, 20000);
+    assert.ok(s.balanced, `accounting broke on level ${n}`);
+    assert.ok(
+      s.collectionPct >= 85,
+      `level ${n} reference cut collected ${s.collectionPct.toFixed(1)}%`
+    );
+  }
+});
+
+test('missing the basin is punished harder as levels go up', () => {
+  // The apron is the whole difficulty curve for aim: land beside the crystal
+  // and early levels forgive it, late levels do not.
+  const missBy = (n, cells) => {
+    const sim = build({ w: 90, h: 150, seed: n, level: n, fractured: false });
+    const g = sim.geometry;
+    const x = g.routeX + cells;
+    sim.digLine(x, g.sealTop - 1, x, g.floorY - 1, 3);
+    return run(sim, 12000).collectionPct;
+  };
+  // Far enough off that level 1's generous apron is the only thing saving it.
+  const early = missBy(1, 12);
+  const late = missBy(60, 12);
+  assert.ok(
+    early > late,
+    `a 12-cell miss scored ${early.toFixed(1)}% on level 1 and ` +
+      `${late.toFixed(1)}% on level 60 — the later level should hurt more`
+  );
 });

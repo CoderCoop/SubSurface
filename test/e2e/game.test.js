@@ -112,13 +112,13 @@ test('digging the clay corridor clears the level and earns a grade', async () =>
   await ctx.close();
 });
 
-test('a shaft through the sand fails, and offers a way out', async () => {
+test('missing the collector fails the level, and offers a way out', async () => {
   /*
-   * Deliberately not asserting WHICH failure. A cut through the sand can end
-   * either way — UNWINNABLE once the drains have taken enough that the ceiling
-   * drops under the pass mark, or STUCK when the band swallows and holds the
-   * payload instead — and which one you get depends on how the collapse falls
-   * out. CI proved that by reaching 71% where this machine reaches 41%.
+   * Deliberately not asserting WHICH failure. A miss can end either way —
+   * UNWINNABLE once the drains have taken enough that the ceiling drops under
+   * the pass mark, or STUCK when the ground swallows and holds the payload
+   * instead — and which one you get depends on how the collapse falls out. CI
+   * proved that by reaching 71% where this machine reaches 41%.
    *
    * The contract that always holds, and the one a player cares about, is that
    * the level does not clear and the game tells you so with a way to restart.
@@ -150,6 +150,33 @@ test('a shaft through the sand fails, and offers a way out', async () => {
   await page.waitForTimeout(500);
   assert.strictEqual(await text(page, '#banner'), '');
   assert.strictEqual(await text(page, '#collected'), '0%');
+  await ctx.close();
+});
+
+test('the sand band shows up in its own stage band, and swallows a shaft', async () => {
+  // Levels 1–10 are clay: there is no sand to cut through until stage 11. The
+  // levels genuinely differ, so this has to go and look at one that has sand.
+  const { ctx, page } = await open();
+  await page.locator('#start').tap();
+  await page.locator('#labtoggle').tap();
+  await page.fill('#levelnum', '15');
+  await page.locator('#go').tap();
+  await page.waitForTimeout(400);
+  assert.strictEqual(await text(page, '#seedlabel'), 'level 15');
+  await page.locator('#labtoggle').tap(); // out of the way of the drag
+
+  // Well left of the corridor, straight down through the band.
+  await digDown(page, 0.3);
+  const ended = await until(page, async () => {
+    const b = await text(page, '#banner');
+    return b.includes('UNWINNABLE') || b.includes('STUCK');
+  });
+  assert.ok(ended, `expected a failure, banner was: ${await text(page, '#banner')}`);
+  // Sand holding fluid is the signature of this failure rather than a drain.
+  assert.ok(
+    parseInt(await text(page, '#held'), 10) > 0,
+    'the sand band should have taken some of the payload'
+  );
   await ctx.close();
 });
 
@@ -222,14 +249,61 @@ test('clearing a level offers a way onward', async () => {
   await ctx.close();
 });
 
-test('Next level moves on', async () => {
+test('Next level is locked until the level is cleared, then it moves on', async () => {
   const { ctx, page } = await open();
   await page.locator('#start').tap();
   await page.waitForTimeout(200);
   assert.strictEqual(await text(page, '#seedlabel'), 'level 1');
-  await page.locator('#next').tap();
+
+  const next = page.locator('#next');
+  assert.ok(await next.isDisabled(), 'level 2 should be locked before level 1 is cleared');
+
+  await page.locator('#labtoggle').tap();
+  await page.locator('#solve').tap();
+  assert.ok(
+    await until(page, async () => (await text(page, '#banner')).includes('CLEAR'))
+  );
+
+  assert.ok(await next.isEnabled(), 'clearing the level should unlock the next one');
+  await next.tap();
   await page.waitForTimeout(400);
   assert.strictEqual(await text(page, '#seedlabel'), 'level 2');
+  // And level 3 is locked again, one at a time.
+  assert.ok(await next.isDisabled(), 'the gate should close again on the new level');
+  await ctx.close();
+});
+
+test('unlocked progress survives a reload', async () => {
+  const ctx = await browser.newContext(PHONE);
+  const page = await ctx.newPage();
+  await page.goto(base, { waitUntil: 'load' });
+  await page.locator('#start').tap();
+  await page.locator('#labtoggle').tap();
+  await page.locator('#solve').tap();
+  assert.ok(
+    await until(page, async () => (await text(page, '#banner')).includes('CLEAR'))
+  );
+
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(400);
+  assert.strictEqual(await text(page, '#seedlabel'), 'level 1');
+  assert.ok(
+    await page.locator('#next').isEnabled(),
+    'a level cleared before the reload should still be cleared after it'
+  );
+  await ctx.close();
+});
+
+test('experimental mode goes past the gate', async () => {
+  // The unlock gate is for players finding their way through the game. The
+  // debug panel is not, and has to keep working from a standing start.
+  const { ctx, page } = await open();
+  await page.locator('#start').tap();
+  await page.locator('#labtoggle').tap();
+  await page.fill('#levelnum', '30');
+  await page.locator('#go').tap();
+  await page.waitForTimeout(500);
+  assert.strictEqual(await text(page, '#seedlabel'), 'level 30');
   await ctx.close();
 });
 
@@ -273,3 +347,55 @@ test('the reference cut solves the level it is offered for', async () => {
   assert.ok(won, `reference cut should clear, banner: ${await text(page, '#banner')}`);
   await ctx.close();
 });
+
+// ---------------------------------------------------------------------------
+// Layout — the board should fill the window, without pushing controls off it
+// ---------------------------------------------------------------------------
+
+const SCREENS = [
+  ['phone', PHONE],
+  ['tablet', { viewport: { width: 820, height: 1180 } }],
+  ['desktop', { viewport: { width: 1440, height: 900 } }],
+  ['short laptop', { viewport: { width: 1280, height: 620 } }]
+];
+
+for (const [name, opts] of SCREENS) {
+  test(`on a ${name} the board fills the window and the controls stay on it`, async () => {
+    const { ctx, page } = await open(opts);
+    // click, not tap: the desktop contexts here have no touch support.
+    await page.locator('#start').click();
+    await page.waitForTimeout(200);
+
+    const vp = page.viewportSize();
+    const board = await page.locator('#view').boundingBox();
+
+    // The board is 3:5 and keeps that shape, so "full screen" means it fills
+    // the axis that runs out first. Height is that axis on every screen here.
+    assert.ok(
+      board.height > vp.height * 0.72,
+      `board is ${Math.round(board.height)}px tall in a ${vp.height}px window`
+    );
+    assert.ok(
+      Math.abs(board.width / board.height - 120 / 200) < 0.02,
+      'the board must keep its aspect ratio rather than stretch'
+    );
+
+    // Nothing may hang off the window: the page does not scroll, so anything
+    // past the edge is unreachable. This is how the Restart button went
+    // missing before, so it is checked on every size.
+    assert.strictEqual(
+      await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight + 1),
+      false,
+      'the page should never need scrolling'
+    );
+    for (const id of ['#reset', '#next', '#help']) {
+      const b = await page.locator(id).boundingBox();
+      assert.ok(b, `${id} should be laid out`);
+      assert.ok(
+        b.y >= 0 && b.y + b.height <= vp.height + 1 && b.x >= 0 && b.x + b.width <= vp.width + 1,
+        `${id} is off screen at ${JSON.stringify(b)} in ${vp.width}x${vp.height}`
+      );
+    }
+    await ctx.close();
+  });
+}
