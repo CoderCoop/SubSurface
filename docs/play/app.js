@@ -76,6 +76,40 @@
   var glowImg = gctx.createImageData(GRID_W, GRID_H);
   var vignette = null;
 
+  /*
+   * Smooth fluid.
+   *
+   * Drawing the grid straight up with nearest-neighbour makes the payload a
+   * staircase of squares, which is the single thing keeping this from looking
+   * like the cross-sections the spec asks for. So fluid comes out of the cell
+   * buffer entirely and gets its own pass:
+   *
+   *   1. write fluid to its own grid-sized buffer, shaded as before
+   *   2. blur it up to canvas size and crush the result with contrast, which
+   *      turns a blurred cloud back into a hard edge — the standard
+   *      blur-and-threshold trick, and what gives blobs a flowing outline
+   *      instead of corners
+   *   3. draw the same buffer again through that silhouette with smoothing on,
+   *      so the depth shading and surface highlight survive the rounding
+   *
+   * Two extra drawImage calls and one grid-sized buffer. If a browser lacks
+   * canvas filters the silhouette step is skipped and it degrades to the
+   * bilinear version, which is softer than the staircase but not shaped.
+   */
+  var waterBuf = document.createElement('canvas');
+  waterBuf.width = GRID_W;
+  waterBuf.height = GRID_H;
+  var wctx = waterBuf.getContext('2d');
+  var waterImg = wctx.createImageData(GRID_W, GRID_H);
+
+  var fxBuf = document.createElement('canvas');
+  var fxCtx = fxBuf.getContext('2d');
+  var HAS_FILTER = (function () {
+    var c = document.createElement('canvas').getContext('2d');
+    c.filter = 'blur(1px)';
+    return c.filter === 'blur(1px)';
+  })();
+
   var sim, bodies, seed = 1, outcome = null, digging = false, last = null;
   var stall = 0, prev = '', tick = 0, cursor = null, passed = false;
   // Elapsed play time for the level: accrues only while the level is live,
@@ -213,6 +247,7 @@
   function draw(s) {
     var d = img.data,
       gd = glowImg.data,
+      wd = waterImg.data,
       cells = sim.cells,
       tint = sim.tint,
       head = sim.head,
@@ -298,13 +333,29 @@
       var rr = r < 0 ? 0 : r > 255 ? 255 : r;
       var gg = g < 0 ? 0 : g > 255 ? 255 : g;
       var bb = b < 0 ? 0 : b > 255 ? 255 : b;
-      d[o] = rr;
-      d[o + 1] = gg;
-      d[o + 2] = bb;
+      var isWater = m === MAT.WATER;
+
+      // Fluid is cut out of the terrain buffer and drawn smoothly on top, so
+      // what shows underneath it is the hole it is sitting in.
+      if (isWater) {
+        var e = COLORS[MAT.EMPTY];
+        d[o] = e[0];
+        d[o + 1] = e[1];
+        d[o + 2] = e[2];
+      } else {
+        d[o] = rr;
+        d[o + 1] = gg;
+        d[o + 2] = bb;
+      }
       d[o + 3] = 255;
 
+      wd[o] = isWater ? rr : 0;
+      wd[o + 1] = isWater ? gg : 0;
+      wd[o + 2] = isWater ? bb : 0;
+      wd[o + 3] = isWater ? 255 : 0;
+
       // Only emitters go into the bloom buffer.
-      var lit = m === MAT.WATER || m === MAT.COLLECTOR;
+      var lit = isWater || m === MAT.COLLECTOR;
       gd[o] = lit ? rr : 0;
       gd[o + 1] = lit ? gg : 0;
       gd[o + 2] = lit ? bb : 0;
@@ -312,6 +363,7 @@
     }
     bctx.putImageData(img, 0, 0);
     gctx.putImageData(glowImg, 0, 0);
+    wctx.putImageData(waterImg, 0, 0);
 
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, display.width, display.height);
@@ -320,6 +372,7 @@
     var sx = display.width / GRID_W,
       sy = display.height / GRID_H;
 
+    drawFluid(sx);
     drawTargets(sx, sy, s);
     drawChunks(sx, sy);
     drawParticles(sx, sy);
@@ -327,6 +380,42 @@
     drawVignette();
     // The cursor sits above the grade, so the tool stays readable over glow.
     drawCursor(sx, sy);
+  }
+
+  /*
+   * Canvas blur costs area, and blurring at full canvas size ran the whole
+   * frame to 15.8ms of a 16.67ms budget — over the line on anything slower
+   * than this machine. The silhouette does not need that resolution: it is a
+   * soft shape, so it is built at a fraction of the canvas and scaled up when
+   * composited. The upscale is bilinear, which only helps a rounded edge.
+   */
+  var FX_SCALE = 0.5;
+
+  function drawFluid(sx) {
+    var fw = Math.max(1, Math.round(display.width * FX_SCALE));
+    var fh = Math.max(1, Math.round(display.height * FX_SCALE));
+    if (fxBuf.width !== fw || fxBuf.height !== fh) {
+      fxBuf.width = fw;
+      fxBuf.height = fh;
+    }
+    fxCtx.clearRect(0, 0, fw, fh);
+    fxCtx.imageSmoothingEnabled = true;
+
+    // Blur by roughly a cell and a half, then crush the falloff back into an
+    // edge. Tied to cell size so it holds at any canvas scale.
+    if (HAS_FILTER) {
+      fxCtx.filter = 'blur(' + (sx * FX_SCALE * 1.4).toFixed(2) + 'px) contrast(14)';
+    }
+    fxCtx.drawImage(waterBuf, 0, 0, fw, fh);
+    fxCtx.filter = 'none';
+
+    // Repaint the shading inside the silhouette we just carved.
+    fxCtx.globalCompositeOperation = 'source-in';
+    fxCtx.drawImage(waterBuf, 0, 0, fw, fh);
+    fxCtx.globalCompositeOperation = 'source-over';
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(fxBuf, 0, 0, display.width, display.height);
   }
 
   // Two additive passes at different scales: a tight one for the core and a
