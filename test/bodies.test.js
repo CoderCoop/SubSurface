@@ -243,15 +243,22 @@ test('fluid slows a chunk falling through it', () => {
 // Integration with the level
 // ---------------------------------------------------------------------------
 
+/*
+ * Fractured rock is introduced at stage 21 (spec §5), so a level has to be
+ * asked for from that band before there is a slab to shatter. Level and seed
+ * are separate arguments precisely so a test can pin the one it cares about.
+ */
+const ROCKY = 25;
+
 test('the level scores a fractured band into chunks', () => {
-  const sim = buildLevel({ w: 90, h: 150, seed: 7 });
+  const sim = buildLevel({ w: 90, h: 150, seed: 7, level: ROCKY });
   assert.ok(sim.chunks.length > 10, `expected a scored band, got ${sim.chunks.length}`);
   const g = sim.geometry;
   assert.strictEqual(sim.raw(g.routeX, (g.fracTop + g.fracBot) >> 1), MAT.FRACTURED);
 });
 
 test('cutting the corridor shatters rock into the shaft', () => {
-  const sim = buildLevel({ w: 90, h: 150, seed: 7 });
+  const sim = buildLevel({ w: 90, h: 150, seed: 7, level: ROCKY });
   const g = sim.geometry;
   const bod = new Bodies(sim);
 
@@ -269,7 +276,7 @@ test('cutting the corridor shatters rock into the shaft', () => {
 });
 
 test('the corridor route still clears 85% with rock tumbling into the shaft', () => {
-  const sim = buildLevel({ w: 90, h: 150, seed: 7 });
+  const sim = buildLevel({ w: 90, h: 150, seed: 7, level: ROCKY });
   const g = sim.geometry;
   const bod = new Bodies(sim);
 
@@ -293,7 +300,7 @@ test('the corridor route still clears 85% with rock tumbling into the shaft', ()
 });
 
 test('a level with no fractured rock creates no bodies', () => {
-  const sim = buildLevel({ w: 90, h: 150, seed: 7, fractured: false });
+  const sim = buildLevel({ w: 90, h: 150, seed: 7, level: ROCKY, fractured: false });
   assert.strictEqual(sim.chunks.length, 0);
   const bod = new Bodies(sim);
   const g = sim.geometry;

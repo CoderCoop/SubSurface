@@ -129,8 +129,84 @@
     banner: document.getElementById('banner'),
     chunks: document.getElementById('chunks'),
     seed: document.getElementById('seedlabel'),
+    next: document.getElementById('next'),
     intro: document.getElementById('intro')
   };
+
+  /* ---------------------------------------------------------------------
+   * Progress
+   *
+   * Levels are generated from their number, so every one of them exists
+   * already — but walking straight to level 60 skips the teaching and just
+   * looks broken. The next level unlocks when this one is cleared, and how
+   * far you have got is remembered between visits.
+   *
+   * Experimental mode deliberately ignores this. That is what it is for.
+   * ------------------------------------------------------------------- */
+  var UNLOCK_KEY = 'subsurface.unlocked';
+  var unlocked = (function () {
+    // Private-mode Safari throws on storage access rather than returning null.
+    try {
+      return Math.max(1, parseInt(localStorage.getItem(UNLOCK_KEY), 10) || 1);
+    } catch (e) {
+      return 1;
+    }
+  })();
+
+  function unlock(level) {
+    if (level <= unlocked) return;
+    unlocked = level;
+    try {
+      localStorage.setItem(UNLOCK_KEY, String(level));
+    } catch (e) {
+      /* progress just does not persist; the run still works */
+    }
+    syncNext();
+  }
+
+  function syncNext() {
+    if (!el.next) return;
+    var open = seed + 1 <= unlocked;
+    el.next.disabled = !open;
+    el.next.title = open ? '' : 'Clear this level to unlock the next one';
+  }
+
+  /* ---------------------------------------------------------------------
+   * Canvas fit
+   *
+   * The board fills whatever the layout gives it, which on a desktop is the
+   * full height of the window. A fixed backing store would then be upscaled
+   * and soft, so match it to the box — capped, because every pixel here is
+   * paid for again by the blur and bloom passes, and past about four device
+   * pixels per cell there is nothing left to resolve.
+   * ------------------------------------------------------------------- */
+  var MAX_CELL_PX = 4;
+  var stage = display.parentNode;
+
+  function fit() {
+    /*
+     * The CSS size is set here rather than in the stylesheet. `height: 100%`
+     * with `max-width: 100%` does not letterbox — the width clamps and the
+     * board stretches, because the height is still an explicit 100%. Working
+     * out the larger of the two fits and setting both is one line and exact.
+     */
+    var box = stage.getBoundingClientRect();
+    if (!box.width || !box.height) return;
+    var scale = Math.min(box.width / GRID_W, box.height / GRID_H);
+    display.style.width = Math.floor(GRID_W * scale) + 'px';
+    display.style.height = Math.floor(GRID_H * scale) + 'px';
+
+    var dpr = window.devicePixelRatio || 1;
+    var want = Math.min(Math.round(GRID_W * scale * dpr), GRID_W * MAX_CELL_PX);
+    want = Math.max(GRID_W * 2, want);
+    if (display.width === want) return;
+    display.width = want;
+    display.height = Math.round((want * GRID_H) / GRID_W);
+    vignette = null; // it is built in canvas pixels, so a resize invalidates it
+  }
+
+  window.addEventListener('resize', fit);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', fit);
 
   /* ---------------------------------------------------------------------
    * Particles
@@ -233,6 +309,7 @@
     el.banner.className = 'banner';
     el.banner.innerHTML = '';
     el.seed.textContent = 'level ' + seed;
+    syncNext();
     var f = document.getElementById('levelnum');
     if (f) f.value = seed;
   }
@@ -708,6 +785,7 @@
       if (!passed) {
         passed = true;
         clearTime = elapsed; // the time that counts is time to clear
+        unlock(seed + 1);
       }
       var next = nextTier(pct);
       setBanner(
@@ -961,8 +1039,9 @@
   /*
    * Experimental mode. Levels are generated from a seed rather than authored,
    * so "go to level N" is just "build with seed N" — every level exists
-   * already and none of them are gated. Kept behind a toggle because jumping
-   * around and auto-solving are debugging tools, not the game.
+   * already, whether or not it has been unlocked. This is the one door that
+   * ignores the unlock gate, which is the point of it. Kept behind a toggle
+   * because jumping around and auto-solving are debugging tools, not the game.
    */
   var lab = document.getElementById('lab');
   document.getElementById('labtoggle').addEventListener('click', function () {
@@ -980,6 +1059,7 @@
     if (ev.key === 'Enter') goToLevel();
   });
 
+  fit();
   reset(1);
   requestAnimationFrame(frame);
 })();
