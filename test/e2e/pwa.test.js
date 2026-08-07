@@ -69,7 +69,17 @@ test('the app loads and plays with the network cut', async () => {
   await page.reload({ waitUntil: 'load' });
   await page.waitForTimeout(800);
 
-  assert.strictEqual(await page.evaluate(() => navigator.onLine), false);
+  // Prove the network really is gone rather than trusting navigator.onLine,
+  // which some runners leave true under emulation. A cross-origin request is
+  // the right probe: the worker passes those straight through, so nothing but
+  // an actual network can answer it.
+  const reachedNetwork = await page.evaluate(() =>
+    fetch('https://offline-probe.invalid/x', { mode: 'no-cors' })
+      .then(() => true)
+      .catch(() => false)
+  );
+  assert.strictEqual(reachedNetwork, false, 'the network should be unreachable');
+
   const loaded = await page.evaluate(() => ({
     planck: typeof window.planck,
     sim: typeof window.Subsurface,

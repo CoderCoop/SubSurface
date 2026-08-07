@@ -102,7 +102,13 @@ const text = (page, sel) => page.locator(sel).textContent();
 
 // Poll until the predicate holds, so tests wait on the simulation reaching a
 // state rather than on a fixed sleep that is either flaky or slow.
-async function until(page, fn, { timeout = 45000, interval = 400 } = {}) {
+//
+// The budget is generous on purpose. These wait on a real-time simulation
+// draining a reservoir, and a CI runner is markedly slower than a laptop — 45s
+// was enough locally and not enough on a runner, which is the classic way an
+// end-to-end suite becomes flaky. Waiting longer costs nothing when the
+// predicate holds, since it returns as soon as it does.
+async function until(page, fn, { timeout = 120000, interval = 400 } = {}) {
   const t0 = Date.now();
   for (;;) {
     if (await fn()) return true;
