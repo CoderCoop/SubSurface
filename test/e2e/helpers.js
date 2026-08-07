@@ -84,17 +84,24 @@ function watch(page, errors) {
   });
 }
 
-// Drag a straight line down the canvas, in fractions of its box.
+/*
+ * Drag a straight line down the canvas, in fractions of its box.
+ *
+ * The whole stroke goes through a single interpolated move rather than a loop
+ * with waits between steps. That matters for repeatability: the simulation
+ * keeps running while a drag is in progress, so any real time spent mid-stroke
+ * lets sand slump and fluid move before the rest of the cut lands. A loop with
+ * 8ms waits carved a measurably different channel on a slow CI runner than on
+ * a laptop, and the level then played out differently. One move keeps the cut
+ * close to instantaneous, so the same drag means the same channel.
+ */
 async function digDown(page, xFrac, fromY = 0.3, toY = 0.93) {
   const box = await page.locator('#view').boundingBox();
   const x = box.x + box.width * xFrac;
   const y = (f) => box.y + box.height * f;
   await page.mouse.move(x, y(fromY));
   await page.mouse.down();
-  for (let t = fromY; t <= toY; t += 0.03) {
-    await page.mouse.move(x, y(t));
-    await page.waitForTimeout(8);
-  }
+  await page.mouse.move(x, y(toY), { steps: 30 });
   await page.mouse.up();
 }
 
