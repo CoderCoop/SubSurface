@@ -573,18 +573,24 @@
    * curve following the stage bands in spec §5: clay, then sand, then fractured
    * rock, then all of it together.
    *
-   * Three things advance, and they are deliberately separate:
+   * Two axes, and they are not the same axis:
    *
-   *   materials  arrive one at a time, so each is learned on its own before it
-   *              has to be juggled with the last one
-   *   tolerance  the apron of safe bedrock around the collector shrinks, so a
-   *              near miss goes from survivable to expensive to fatal
-   *   geometry   the corridor narrows and stops being in the same place, so the
-   *              route has to be read rather than remembered
+   *   harder     materials arrive one band at a time (spec §5) so each is
+   *              learned alone; the corridor narrows; the apron of safe
+   *              bedrock around the collector shrinks
+   *   different  where the corridor is, how deep the seal and the cavern sit,
+   *              which side the rib is on, where the pockets are
    *
-   * Everything is expressed as a fraction and clamped, so the far end of the
-   * curve is hard but still has a corridor wide enough to cut and a basin wide
-   * enough to hit. A level that cannot be solved is not difficulty.
+   * Keeping those apart matters. A first pass tied every dial to the stage
+   * bands, which meant nothing at all moved inside band one — levels 1 to 10
+   * built the identical cross-section and differed only in tint noise. Being
+   * early in the game is a reason to be easy, never a reason to be the same
+   * level again. So the "different" dials run from level 2, driven by a hash
+   * of the level number, and only the "harder" dials follow the bands.
+   *
+   * Everything is a fraction and clamped, so the far end of the curve is hard
+   * but still has a corridor wide enough to cut and a basin wide enough to
+   * hit. A level that cannot be solved is not difficulty.
    */
   function difficultyFor(level) {
     var n = Math.max(1, level | 0);
@@ -595,31 +601,55 @@
     var late = within(31, 30); // the open-ended band beyond stage 30
 
     /*
-     * Where the corridor sits. Through the teaching levels it is pinned to the
-     * right, so the lesson is the material and not the search. From 16 it
-     * starts to wander, by an amount that grows and a direction that is a hash
-     * of the level number — same level, same layout, every time.
+     * Independent 0..1 streams keyed to the level number. Same level, same
+     * layout, forever — which is what makes a level something you can learn,
+     * lose, and come back to.
+     *
+     * Through the level generator's own PRNG rather than a sin-fract hash:
+     * fract(sin(n)) correlates badly for small consecutive integers, and
+     * consecutive integers are exactly what this is fed. It put levels 7, 8
+     * and 9 within a cell of each other.
      */
-    var jitter = ((Math.sin(n * 12.9898) * 43758.5453) % 1 + 1) % 1;
+    var pick = function (salt) {
+      return mulberry32(Math.imul(n, 92837111) + Math.imul(salt, 689287499))();
+    };
 
     return {
       level: n,
       sand: n >= 11,
       fractured: n >= 21,
-      // The clay corridor: from generous down to a genuinely tight lane.
-      corridor: 0.38 - 0.16 * within(11, 20) - 0.07 * late,
-      // How far left of the right wall the corridor may sit, 0 = pinned right.
-      wander: within(16, 15) * jitter,
+      pick: pick,
+
+      // --- harder ---------------------------------------------------------
+      // The clay corridor: from generous down to a genuinely tight lane. It
+      // starts narrowing immediately, so level 9 is not level 1 with a
+      // different speckle.
+      corridor: 0.42 - 0.09 * within(1, 10) - 0.13 * within(11, 20) - 0.07 * late,
       // Sand deepens through its band and keeps creeping afterwards.
       sandDepth: 0.14 + 0.06 * within(11, 12) + 0.05 * late,
       // Fractured slab thickens once it appears.
       fracDepth: 0.08 + 0.05 * within(21, 12) + 0.03 * late,
       // Basin width as a share of the corridor, so it always fits inside it
       // and tightens twice over: a smaller share of a narrower corridor.
-      basin: 0.66 - 0.18 * within(6, 24) - 0.08 * late,
+      basin: 0.68 - 0.22 * within(1, 30) - 0.06 * late,
       // Bedrock apron flanking the basin — the margin for a near miss. Land
       // on it and the fluid still slides home; miss it and the floor is drain.
-      apron: 0.11 - 0.06 * within(6, 24) - 0.02 * late
+      apron: 0.13 - 0.08 * within(1, 30) - 0.03 * late,
+
+      // --- different ------------------------------------------------------
+      // How far in from the right wall the corridor may sit. Level 1 is
+      // pinned right so the first level is the plainest statement of the
+      // rule; every level after that puts the route somewhere else.
+      wander: within(2, 4) * pick(1),
+      // The strata themselves move, so the cross-section reads as a new place
+      // and not as the same diagram with one lane shifted.
+      sealAt: 0.27 + 0.05 * pick(2),
+      sandAt: 0.43 + 0.05 * pick(3),
+      fracAt: 0.68 + 0.04 * pick(4),
+      cavernAt: 0.79 + 0.05 * pick(5),
+      // Which side the bedrock rib blocks, and how far across it reaches.
+      ribAt: 0.6 + 0.08 * pick(6),
+      ribReach: 0.22 + 0.16 * pick(7)
     };
   }
 
@@ -682,10 +712,16 @@
         if (x < WALL || x >= w - WALL || y < 2 || y >= h - 2)
           sim.set(x, y, BEDROCK);
 
-    var sealTop = band(0.3),
-      sandTop = band(0.46),
-      sandBot = band(0.6),
-      cavernTop = band(0.82),
+    /*
+     * The strata. Depths come off the difficulty curve rather than being
+     * constants, so two levels are two places rather than two paint jobs on
+     * one diagram — a thin seal over a deep cavern plays quite differently
+     * from a deep seal over a shallow one, and it reads differently too.
+     */
+    var sealTop = band(D.sealAt),
+      sandTop = band(D.sandAt),
+      sandBot = band(D.sandAt + 0.14),
+      cavernTop = band(D.cavernAt),
       floorY = band(0.94);
 
     // Clay from the reservoir seal down to the cavern roof; the sand band and
@@ -701,12 +737,16 @@
      * The corridor is the route; the sand is the trap that looks like a
      * shortcut.
      *
-     * Early on the corridor hugs the right wall, so the lesson is the material.
-     * Later it wanders, and the sand closes in behind it on both sides.
+     * Level 1 hugs the right wall — the plainest statement of the rule. From
+     * level 2 the lane is somewhere else each time, and once the sand band
+     * arrives it closes in on both sides of wherever the lane has gone.
      */
     var wallF = WALL / w + 0.01;
     var rightmost = 1 - wallF - D.corridor / 2;
-    var leftmost = Math.max(0.3 + D.corridor / 2, wallF + D.corridor / 2);
+    // The lane may sit anywhere between the walls. It used to be pinned out
+    // of the left third to leave the bedrock rib somewhere to live, which
+    // cost half the available variety; the rib now picks its own side.
+    var leftmost = wallF + D.corridor / 2 + 0.05;
     var corridorC = rightmost - D.wander * Math.max(0, rightmost - leftmost);
     var corridorL = col(corridorC - D.corridor / 2),
       corridorR = col(corridorC + D.corridor / 2);
@@ -722,13 +762,19 @@
     // of the sand, which is what they actually wanted.
     var sandRight = corridorL;
 
-    // A bedrock rib on the left, so the far-left wall is not a free ride
-    // around the band.
-    var ribY = band(0.66),
+    /*
+     * A bedrock rib reaching in from the wall the corridor is furthest from,
+     * so the long way round is not a free ride. Which side and how far it
+     * reaches are level-specific; it never crosses the corridor, because a
+     * rib over the route would be a wall, not an obstacle.
+     */
+    var ribY = band(D.ribAt),
       ribH = Math.max(2, Math.round(0.03 * h));
+    var ribLeft = corridorC > 0.5; // reach in from whichever side is roomier
+    var ribFrom = ribLeft ? WALL : Math.max(corridorR + 2, w - WALL - col(D.ribReach));
+    var ribTo = ribLeft ? Math.min(col(D.ribReach), corridorL - 2) : w - WALL;
     for (y = ribY; y < ribY + ribH; y++)
-      for (x = WALL; x < Math.min(col(0.3), corridorL); x++)
-        sim.set(x, y, BEDROCK);
+      for (x = ribFrom; x < ribTo; x++) sim.set(x, y, BEDROCK);
 
     /*
      * A fractured slab across the clay corridor, pre-scored into chunks. It
@@ -737,7 +783,7 @@
      * you just made, where it can wedge and throttle the flow — or, cut
      * carefully, act as a valve.
      */
-    var fracTop = band(0.7),
+    var fracTop = band(D.fracAt),
       fracBot = fracTop + Math.round(D.fracDepth * h),
       // A margin either side, so the slab cannot be sidestepped by hugging
       // the corridor wall — it spans the route and then some.
@@ -766,11 +812,19 @@
         }
     }
 
-    // Dry sand pockets suspended in the lower clay.
-    var pockets = [
-      [col(0.24), band(0.74), Math.round(0.07 * w)],
-      [col(0.5), band(0.71), Math.round(0.06 * w)]
-    ];
+    /*
+     * Dry sand pockets suspended in the lower clay. Placed per level rather
+     * than at two fixed spots: they are the readable landmarks of a level,
+     * and landmarks in the same place every time are wallpaper.
+     */
+    var pockets = [];
+    for (var pk = 0; pk < 3; pk++) {
+      pockets.push([
+        col(0.12 + 0.72 * D.pick(10 + pk)),
+        band(0.66 + 0.12 * D.pick(20 + pk)),
+        Math.round((0.045 + 0.035 * D.pick(30 + pk)) * w)
+      ]);
+    }
     for (var p = 0; p < pockets.length; p++) {
       var px = pockets[p][0],
         py = pockets[p][1],
@@ -858,6 +912,9 @@
       sandRight: sandRight,
       corridorL: corridorL,
       corridorR: corridorR,
+      ribY: ribY,
+      ribFrom: ribFrom,
+      ribTo: ribTo,
       apron: apron,
       cavernTop: cavernTop,
       floorY: floorY,

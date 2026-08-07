@@ -28,6 +28,21 @@ async function open(opts = PHONE) {
   return { ctx, page, errors };
 }
 
+/*
+ * Experimental mode and the reference cut live on the title screen, which is
+ * also the menu. Reaching them from a running level means opening the menu
+ * first — and #solve starts the selected level before it cuts, so this works
+ * whether or not a level is already in play.
+ */
+async function solveFromMenu(page) {
+  if (await page.locator('#intro').isHidden()) {
+    await page.locator('#menu').tap();
+    await page.waitForTimeout(200);
+  }
+  await page.check('#experimental');
+  await page.locator('#solve').tap();
+}
+
 // ---------------------------------------------------------------------------
 // The title screen
 // ---------------------------------------------------------------------------
@@ -74,13 +89,57 @@ test('dragging behind the intro does not dig, dragging after it does', async () 
   await ctx.close();
 });
 
-test('How to play reopens the intro', async () => {
+test('Menu reopens the title screen, and leaving it does not restart', async () => {
   const { ctx, page } = await open();
   await page.locator('#start').tap();
   await page.waitForTimeout(200);
-  await page.locator('#help').tap();
+  // A full cut, not a shallow one: this waits on fluid actually arriving, so
+  // the channel has to reach the cavern or the wait never resolves.
+  await digDown(page, 0.78);
+  assert.ok(
+    await until(page, async () => parseInt(await text(page, '#collected'), 10) > 0),
+    'the cut should be delivering before the menu is opened'
+  );
+  const banked = parseInt(await text(page, '#collected'), 10);
+
+  await page.locator('#menu').tap();
   await page.waitForTimeout(200);
-  assert.ok(await page.locator('#intro').isVisible());
+  assert.ok(await page.locator('#intro').isVisible(), 'Menu should open the title screen');
+
+  // Closing the menu on the level you are already playing means carry on.
+  // Throwing the run away is what Restart level is for.
+  await page.locator('#start').tap();
+  await page.waitForTimeout(300);
+  assert.ok(await page.locator('#intro').isHidden());
+  assert.ok(
+    parseInt(await text(page, '#collected'), 10) >= banked,
+    'leaving the menu should resume the level, not reset it'
+  );
+  await ctx.close();
+});
+
+test('the level selector picks a level from the title screen', async () => {
+  const { ctx, page } = await open();
+  // Locked levels are out of reach: the selector clamps to what is unlocked.
+  await page.fill('#levelnum', '9');
+  await page.locator('#start').tap();
+  await page.waitForTimeout(400);
+  assert.strictEqual(await text(page, '#seedlabel'), 'level 1');
+
+  // And the steppers cannot walk past the gate either — the + is simply not
+  // available at the ceiling, rather than available and then ignored.
+  await page.locator('#menu').tap();
+  await page.waitForTimeout(200);
+  assert.ok(
+    await page.locator('#levelplus').isDisabled(),
+    'the selector should stop at the last unlocked level'
+  );
+  assert.ok(
+    await page.locator('#levelminus').isDisabled(),
+    'and at level 1 going down'
+  );
+  assert.strictEqual(await page.inputValue('#levelnum'), '1');
+  assert.strictEqual(await text(page, '#unlocked'), 'unlocked 1');
   await ctx.close();
 });
 
@@ -157,13 +216,11 @@ test('the sand band shows up in its own stage band, and swallows a shaft', async
   // Levels 1–10 are clay: there is no sand to cut through until stage 11. The
   // levels genuinely differ, so this has to go and look at one that has sand.
   const { ctx, page } = await open();
-  await page.locator('#start').tap();
-  await page.locator('#labtoggle').tap();
+  await page.check('#experimental');
   await page.fill('#levelnum', '15');
-  await page.locator('#go').tap();
+  await page.locator('#start').tap();
   await page.waitForTimeout(400);
   assert.strictEqual(await text(page, '#seedlabel'), 'level 15');
-  await page.locator('#labtoggle').tap(); // out of the way of the drag
 
   // Well left of the corridor, straight down through the band.
   await digDown(page, 0.3);
@@ -206,8 +263,7 @@ test('the level clock runs while playing and stops at the clear time', async () 
   await page.waitForTimeout(2500);
   assert.notStrictEqual(await text(page, '#time'), '0:00', 'it should run once playing');
 
-  await page.locator('#labtoggle').tap();
-  await page.locator('#solve').tap();
+  await solveFromMenu(page);
   const won = await until(page, async () =>
     (await text(page, '#banner')).includes('CLEAR')
   );
@@ -226,8 +282,7 @@ test('the level clock runs while playing and stops at the clear time', async () 
 test('clearing a level offers a way onward', async () => {
   const { ctx, page } = await open();
   await page.locator('#start').tap();
-  await page.locator('#labtoggle').tap();
-  await page.locator('#solve').tap();
+  await solveFromMenu(page);
   assert.ok(
     await until(page, async () => (await text(page, '#banner')).includes('CLEAR'))
   );
@@ -258,8 +313,7 @@ test('Next level is locked until the level is cleared, then it moves on', async 
   const next = page.locator('#next');
   assert.ok(await next.isDisabled(), 'level 2 should be locked before level 1 is cleared');
 
-  await page.locator('#labtoggle').tap();
-  await page.locator('#solve').tap();
+  await solveFromMenu(page);
   assert.ok(
     await until(page, async () => (await text(page, '#banner')).includes('CLEAR'))
   );
@@ -278,8 +332,7 @@ test('unlocked progress survives a reload', async () => {
   const page = await ctx.newPage();
   await page.goto(base, { waitUntil: 'load' });
   await page.locator('#start').tap();
-  await page.locator('#labtoggle').tap();
-  await page.locator('#solve').tap();
+  await solveFromMenu(page);
   assert.ok(
     await until(page, async () => (await text(page, '#banner')).includes('CLEAR'))
   );
@@ -294,16 +347,22 @@ test('unlocked progress survives a reload', async () => {
   await ctx.close();
 });
 
-test('experimental mode goes past the gate', async () => {
+test('experimental mode goes past the gate, and is remembered', async () => {
   // The unlock gate is for players finding their way through the game. The
-  // debug panel is not, and has to keep working from a standing start.
-  const { ctx, page } = await open();
-  await page.locator('#start').tap();
-  await page.locator('#labtoggle').tap();
+  // debug switch is not, and has to keep working from a standing start.
+  const ctx = await browser.newContext(PHONE);
+  const page = await ctx.newPage();
+  await page.goto(base, { waitUntil: 'load' });
+  await page.check('#experimental');
   await page.fill('#levelnum', '30');
-  await page.locator('#go').tap();
+  await page.locator('#start').tap();
   await page.waitForTimeout(500);
   assert.strictEqual(await text(page, '#seedlabel'), 'level 30');
+
+  // Someone who turned it on is debugging; resetting it every reload is a bug.
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(400);
+  assert.ok(await page.locator('#experimental').isChecked());
   await ctx.close();
 });
 
@@ -311,24 +370,28 @@ test('experimental mode goes past the gate', async () => {
 // Experimental mode
 // ---------------------------------------------------------------------------
 
-test('experimental mode is hidden until asked for, then jumps to any level', async () => {
+test('experimental mode is off by default, then jumps to any level', async () => {
   const { ctx, page } = await open();
-  await page.locator('#start').tap();
-  await page.waitForTimeout(200);
+  assert.ok(
+    await page.locator('#solve').isHidden(),
+    'the reference cut should not be on offer until asked for'
+  );
+  assert.strictEqual(await text(page, '#unlocked'), 'unlocked 1');
 
-  assert.ok(await page.locator('#lab').isHidden(), 'the panel should start closed');
-  await page.locator('#labtoggle').tap();
-  await page.waitForTimeout(200);
-  assert.ok(await page.locator('#lab').isVisible());
+  await page.check('#experimental');
+  await page.waitForTimeout(100);
+  assert.ok(await page.locator('#solve').isVisible());
+  assert.strictEqual(await text(page, '#unlocked'), 'no limit');
 
   await page.fill('#levelnum', '42');
-  await page.locator('#go').tap();
+  await page.locator('#start').tap();
   await page.waitForTimeout(500);
   assert.strictEqual(await text(page, '#seedlabel'), 'level 42');
 
-  // No level is gated, so a far one has to build too.
+  // Nothing is gated in this mode, so a far one has to build too.
+  await page.locator('#menu').tap();
   await page.fill('#levelnum', '500');
-  await page.locator('#go').tap();
+  await page.locator('#start').tap();
   await page.waitForTimeout(500);
   assert.strictEqual(await text(page, '#seedlabel'), 'level 500');
   await ctx.close();
@@ -338,8 +401,7 @@ test('the reference cut solves the level it is offered for', async () => {
   const { ctx, page } = await open();
   await page.locator('#start').tap();
   await page.waitForTimeout(200);
-  await page.locator('#labtoggle').tap();
-  await page.locator('#solve').tap();
+  await solveFromMenu(page);
 
   const won = await until(page, async () =>
     (await text(page, '#banner')).includes('CLEAR')
@@ -388,7 +450,7 @@ for (const [name, opts] of SCREENS) {
       false,
       'the page should never need scrolling'
     );
-    for (const id of ['#reset', '#next', '#help']) {
+    for (const id of ['#reset', '#next', '#menu']) {
       const b = await page.locator(id).boundingBox();
       assert.ok(b, `${id} should be laid out`);
       assert.ok(

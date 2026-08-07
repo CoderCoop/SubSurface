@@ -162,6 +162,7 @@
       /* progress just does not persist; the run still works */
     }
     syncNext();
+    if (levelInput) syncPicker(); // the menu's "unlocked 1–N" just moved
   }
 
   function syncNext() {
@@ -310,8 +311,12 @@
     el.banner.innerHTML = '';
     el.seed.textContent = 'level ' + seed;
     syncNext();
-    var f = document.getElementById('levelnum');
-    if (f) f.value = seed;
+    // The menu's selector follows the level actually in play, so reopening it
+    // shows where you are rather than where you last pointed.
+    if (levelInput) {
+      levelInput.value = String(seed);
+      syncPicker();
+    }
   }
 
   /* ---------------------------------------------------------------------
@@ -891,14 +896,19 @@
     return !el.intro.hidden;
   }
   function showIntro() {
+    // Reopening the menu should show where you are, not where you last
+    // pointed the selector and then thought better of it.
+    if (levelInput) {
+      levelInput.value = String(seed);
+      syncPicker();
+    }
     el.intro.hidden = false;
   }
   function hideIntro() {
     el.intro.hidden = true;
   }
 
-  document.getElementById('start').addEventListener('click', hideIntro);
-  document.getElementById('help').addEventListener('click', showIntro);
+  document.getElementById('menu').addEventListener('click', showIntro);
 
   /* --- install offer -------------------------------------------------- */
 
@@ -1036,27 +1046,105 @@
     );
   });
 
+  /* ---------------------------------------------------------------------
+   * The menu
+   *
+   * The title screen is also the menu, reached from the deck at any time.
+   * Everything that is not playing lives on it — which level to play, and the
+   * settings — so the board carries the board and nothing else.
+   *
+   * Opening it pauses: the clock already stops while the intro is up, and the
+   * overlay swallows drags, so a level cannot quietly run on behind it.
+   * ------------------------------------------------------------------- */
+  var levelInput = document.getElementById('levelnum');
+  var unlockedLabel = document.getElementById('unlocked');
+  var experimental = document.getElementById('experimental');
+  var solveBtn = document.getElementById('solve');
+  var startBtn = document.getElementById('start');
+
+  // The ceiling on what may be picked. Experimental mode has none — that is
+  // the whole of what it does.
+  function pickCeiling() {
+    return experimental.checked ? Infinity : unlocked;
+  }
+
+  function chosen() {
+    var n = parseInt(levelInput.value, 10);
+    if (!isFinite(n) || n < 1) n = 1;
+    return Math.min(n, pickCeiling());
+  }
+
+  function syncPicker() {
+    var n = chosen();
+    if (String(n) !== levelInput.value) levelInput.value = n;
+    levelInput.max = experimental.checked ? '' : String(unlocked);
+    unlockedLabel.textContent = experimental.checked
+      ? 'no limit'
+      : unlocked === 1
+        ? 'unlocked 1'
+        : 'unlocked 1–' + unlocked;
+    document.getElementById('levelminus').disabled = n <= 1;
+    document.getElementById('levelplus').disabled = n >= pickCeiling();
+    solveBtn.hidden = !experimental.checked;
+    startBtn.textContent = n === seed ? 'Start digging' : 'Play level ' + n;
+  }
+
+  function nudge(by) {
+    levelInput.value = String(Math.max(1, Math.min(pickCeiling(), chosen() + by)));
+    syncPicker();
+  }
+  document.getElementById('levelminus').addEventListener('click', function () {
+    nudge(-1);
+  });
+  document.getElementById('levelplus').addEventListener('click', function () {
+    nudge(1);
+  });
+  levelInput.addEventListener('input', syncPicker);
+
   /*
-   * Experimental mode. Levels are generated from a seed rather than authored,
-   * so "go to level N" is just "build with seed N" — every level exists
-   * already, whether or not it has been unlocked. This is the one door that
-   * ignores the unlock gate, which is the point of it. Kept behind a toggle
-   * because jumping around and auto-solving are debugging tools, not the game.
+   * Experimental mode is remembered, because someone who turned it on is
+   * debugging and having it reset on every reload is its own small bug.
    */
-  var lab = document.getElementById('lab');
-  document.getElementById('labtoggle').addEventListener('click', function () {
-    lab.hidden = !lab.hidden;
-    this.setAttribute('aria-expanded', String(!lab.hidden));
+  var LAB_KEY = 'subsurface.experimental';
+  try {
+    experimental.checked = localStorage.getItem(LAB_KEY) === '1';
+  } catch (e) {
+    /* leave it off */
+  }
+  experimental.addEventListener('change', function () {
+    try {
+      localStorage.setItem(LAB_KEY, experimental.checked ? '1' : '0');
+    } catch (e) {
+      /* the toggle still works, it just will not persist */
+    }
+    syncPicker();
   });
 
-  function goToLevel() {
-    var n = parseInt(document.getElementById('levelnum').value, 10);
-    if (!isFinite(n) || n < 1) n = 1;
-    reset(n);
-  }
-  document.getElementById('go').addEventListener('click', goToLevel);
-  document.getElementById('levelnum').addEventListener('keydown', function (ev) {
-    if (ev.key === 'Enter') goToLevel();
+  /*
+   * Start plays what is selected. Picking the level you are already on means
+   * "carry on" rather than "throw away the cut I have made" — Restart level
+   * is right there in the deck for when that is what you meant.
+   */
+  startBtn.addEventListener('click', function () {
+    var n = chosen();
+    if (n !== seed) reset(n);
+    hideIntro();
+  });
+
+  solveBtn.addEventListener('click', function () {
+    var n = chosen();
+    if (n !== seed) reset(n);
+    hideIntro();
+    var g = sim.geometry;
+    shatter(
+      sim.digLine(
+        g.routeX,
+        g.sealTop - 1,
+        g.routeX,
+        g.floorY - 1,
+        Math.max(2, Math.round(sim.w * 0.03))
+      )
+    );
   });
 
   fit();

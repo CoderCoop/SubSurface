@@ -452,22 +452,56 @@ test('the level gets tighter as the number goes up, and never degenerate', () =>
   }
 });
 
+const shape = (n) => {
+  const g = build({ w: 90, h: 150, seed: n, level: n }).geometry;
+  return [
+    g.corridorL, g.corridorR, g.basinL, g.basinR, g.apron,
+    g.sealTop, g.cavernTop, g.ribY, g.ribFrom, g.ribTo
+  ].join(',');
+};
+
 test('levels are actually different from one another', () => {
-  const shape = (n) => {
-    const g = build({ w: 90, h: 150, seed: n, level: n }).geometry;
-    return [g.corridorL, g.corridorR, g.basinL, g.basinR, g.apron].join(',');
-  };
   const seen = new Set([1, 15, 25, 35, 50, 80].map(shape));
   assert.ok(seen.size >= 5, `expected distinct layouts, got ${seen.size}`);
   // But the same level twice has to build the same, or nothing is learnable.
   assert.strictEqual(shape(37), shape(37));
 });
 
+test('the teaching levels are different levels, not one level ten times', () => {
+  /*
+   * The regression this exists for: a first pass tied every dial to the stage
+   * bands from spec §5, so nothing moved at all inside band one and levels 1
+   * to 10 built the identical cross-section. They are the only levels a new
+   * player sees, and the unlock gate serves them one at a time.
+   */
+  const early = [];
+  for (let n = 1; n <= 10; n++) early.push(shape(n));
+  assert.strictEqual(
+    new Set(early).size,
+    10,
+    'each of the first ten levels should have its own layout'
+  );
+
+  // Not just different numbers — the route has to actually move, or the
+  // answer is "drag down the right-hand side" ten times running.
+  const routes = [];
+  for (let n = 1; n <= 10; n++)
+    routes.push(build({ w: 90, h: 150, seed: n, level: n }).geometry.routeX);
+  assert.ok(
+    Math.max(...routes) - Math.min(...routes) > 90 * 0.25,
+    `the route only moved between x=${Math.min(...routes)} and ` +
+      `x=${Math.max(...routes)} across the first ten levels`
+  );
+});
+
 test('every band still has a reference solution', () => {
   // One straight cut down the corridor into the basin has to clear the bar at
   // any level, or the curve has generated a level nobody can beat. Fractured
   // rock is left out for the reason at the top of this file.
-  for (const n of [1, 12, 24, 33, 48, 90]) {
+  // The early band is swept level by level: those are the ones served one at
+  // a time by the unlock gate, so an unsolvable one is a dead end, not a
+  // level you can skip.
+  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 24, 33, 48, 90]) {
     const sim = carveIdealChannel(build({ w: 90, h: 150, seed: n, level: n }));
     const s = run(sim, 20000);
     assert.ok(s.balanced, `accounting broke on level ${n}`);

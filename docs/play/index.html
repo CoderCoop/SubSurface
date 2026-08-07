@@ -245,66 +245,6 @@
       }
       button.primary:hover { background: #4ce4d5; color: #08201e; }
 
-      /* --- experimental mode --- */
-      .labtoggle {
-        border: none;
-        background: none;
-        color: var(--faint);
-        font-size: 0.62rem;
-        padding: 2px 6px;
-      }
-      .labtoggle:hover { background: none; }
-      /*
-       * Floating over the board rather than in the flow: opening a debug panel
-       * must neither resize the board underneath it nor cover the controls,
-       * which is why it is anchored inside the stage and not to the window.
-       */
-      .lab {
-        position: absolute;
-        z-index: 6;
-        left: 50%;
-        bottom: 10px;
-        transform: translateX(-50%);
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        width: min(92vw, 380px);
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: var(--panel);
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
-        padding: 12px;
-      }
-      /* a class rule with display beats the UA [hidden] rule, so restate it */
-      .lab[hidden] { display: none; }
-      .lab label {
-        font-size: 0.62rem;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        color: var(--faint);
-      }
-      .lab input {
-        width: 74px;
-        font-family: var(--mono);
-        font-size: 0.8rem;
-        background: #0f0d0b;
-        color: var(--ink);
-        border: 1px solid var(--line);
-        border-radius: 5px;
-        padding: 7px 9px;
-      }
-      .lab p {
-        flex-basis: 100%;
-        margin: 0;
-        font-size: 0.62rem;
-        line-height: 1.6;
-        color: var(--faint);
-        font-family: system-ui, sans-serif;
-        letter-spacing: 0;
-      }
-
       /* --- intro --- */
       .intro {
         position: fixed;
@@ -321,6 +261,11 @@
       .card {
         max-width: 420px;
         width: 100%;
+        /* The card is now the menu as well as the title screen, so on a short
+           window it has to be able to scroll rather than crop its own
+           settings off the bottom. */
+        max-height: 100%;
+        overflow-y: auto;
         border: 1px solid var(--line);
         border-radius: 10px;
         background: var(--panel);
@@ -378,6 +323,89 @@
         border-radius: 3px;
         margin-top: 2px;
       }
+      /* --- level select --- */
+      .picker {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #171310;
+        padding: 11px 13px 13px;
+        margin-bottom: 14px;
+      }
+      .pickhead {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 9px;
+      }
+      .pickhead .k {
+        font-size: 0.58rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .pickrow { display: flex; gap: 8px; align-items: stretch; }
+      .pickrow input {
+        flex: 1;
+        min-width: 0;
+        font-family: var(--mono);
+        font-size: 1.15rem;
+        text-align: center;
+        background: #0f0d0b;
+        color: var(--ink);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 8px 6px;
+        /* The steppers are the affordance; the native spinner is not. */
+        -moz-appearance: textfield;
+        appearance: textfield;
+      }
+      .pickrow input::-webkit-outer-spin-button,
+      .pickrow input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      .step {
+        flex: none;
+        width: 46px;
+        font-size: 1.1rem;
+        padding: 0;
+        line-height: 1;
+      }
+
+      /* --- settings --- */
+      .settings {
+        margin-top: 16px;
+        padding-top: 15px;
+        border-top: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .setting {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        cursor: pointer;
+      }
+      .setting input { margin: 2px 0 0; flex: none; accent-color: var(--fluid); }
+      .setting b {
+        display: block;
+        font-size: 0.7rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--ink);
+        font-weight: 400;
+      }
+      .setting em {
+        display: block;
+        margin-top: 3px;
+        font-family: system-ui, sans-serif;
+        font-style: normal;
+        font-size: 0.74rem;
+        line-height: 1.45;
+        letter-spacing: 0;
+        color: var(--faint);
+      }
       .start {
         width: 100%;
         padding: 13px;
@@ -388,13 +416,12 @@
         font-weight: 700;
       }
       .start:hover { background: #4ce4d5; color: #08201e; }
-      .install {
+      .wide {
         width: 100%;
-        margin-top: 9px;
-        padding: 11px;
-        font-size: 0.7rem;
+        padding: 10px;
+        font-size: 0.66rem;
       }
-      .install[hidden] { display: none; }
+      .wide[hidden] { display: none; }
       .installhint {
         margin: 11px 0 0;
         text-align: center;
@@ -469,17 +496,6 @@
       <div class="stage">
         <canvas id="view" width="480" height="800"></canvas>
 
-        <div class="lab" id="lab" hidden>
-          <label for="levelnum">Jump to level</label>
-          <input id="levelnum" type="number" min="1" step="1" value="1" inputmode="numeric" />
-          <button id="go">Go</button>
-          <button id="solve">Show reference cut</button>
-          <p>
-            Levels are generated from their number, so every one already exists
-            whether or not you have unlocked it. This is the only way past the
-            unlock gate. The reference cut digs the intended route for you.
-          </p>
-        </div>
       </div>
 
       <div class="rail deck">
@@ -496,12 +512,8 @@
         <div class="controls">
           <button id="reset" class="primary">Restart level</button>
           <button id="next" disabled>Next level</button>
-          <button id="help">How to play</button>
+          <button id="menu">Menu</button>
         </div>
-
-        <button id="labtoggle" class="labtoggle" aria-expanded="false">
-          Experimental ▾
-        </button>
 
       </div>
     </div>
@@ -547,15 +559,55 @@
           <span><i style="background: #3a3a42"></i>Bedrock — cannot be cut</span>
         </div>
 
+        <!-- ---------------------------------------------------------
+             Level select. The number is the level: they are generated
+             from it, so this is the whole selector. Clamped to what has
+             been unlocked unless experimental mode is on.
+             --------------------------------------------------------- -->
+        <div class="picker">
+          <div class="pickhead">
+            <span class="k">Level</span>
+            <span class="k" id="unlocked">unlocked 1</span>
+          </div>
+          <div class="pickrow">
+            <button id="levelminus" class="step" aria-label="Previous level">−</button>
+            <input
+              id="levelnum"
+              type="number"
+              min="1"
+              step="1"
+              value="1"
+              inputmode="numeric"
+              aria-label="Level number"
+            />
+            <button id="levelplus" class="step" aria-label="Next level">+</button>
+          </div>
+        </div>
+
         <button id="start" class="start">Start digging</button>
 
-        <!-- Install offer. Chromium fires beforeinstallprompt and we show a
-             real button; iOS never does, so it gets the manual instruction
-             instead. Both stay hidden once the app is already installed. -->
-        <button id="install" class="install" hidden>Install app</button>
-        <p id="ioshint" class="installhint" hidden>
-          To install: tap <b>Share</b>, then <b>Add to Home Screen</b>.
-        </p>
+        <!-- ---------------------------------------------------------
+             Settings. Everything that is not playing lives here, so the
+             board itself carries nothing but the board.
+             --------------------------------------------------------- -->
+        <div class="settings">
+          <label class="setting">
+            <input type="checkbox" id="experimental" />
+            <span>
+              <b>Experimental mode</b>
+              <em>Jump to any level, unlocked or not, and reveal the intended cut.</em>
+            </span>
+          </label>
+          <button id="solve" class="wide" hidden>Show reference cut</button>
+
+          <!-- Install offer. Chromium fires beforeinstallprompt and we show a
+               real button; iOS never does, so it gets the manual instruction
+               instead. Both stay hidden once the app is already installed. -->
+          <button id="install" class="wide" hidden>Install app</button>
+          <p id="ioshint" class="installhint" hidden>
+            To install: tap <b>Share</b>, then <b>Add to Home Screen</b>.
+          </p>
+        </div>
 
         <p class="note">
           Early build — no art pass, no sound. Installable and playable offline.
