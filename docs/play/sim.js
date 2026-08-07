@@ -130,6 +130,9 @@
     // high enough that a wide reservoir empties in well under a minute.
     this.viscosity = 0.3;
     this.pressureGain = 0.045; // how fast head raises that chance
+    // How far along a surface a resting cell will look for somewhere to fall.
+    this.flowReach = 6;
+    this.flowReachMax = 16;
     this.releaseHead = 5; // head needed to squeeze fluid back out of wet sand
     this.releaseChance = 0.35; // per-frame chance a pressured cell lets go
 
@@ -256,10 +259,60 @@
 
     var p = this.viscosity + this.head[this.idx(x, y)] * this.pressureGain;
     if (p > 0.92) p = 0.92;
-    if (this.rand() < p) {
-      if (this.flow(x, y, x + d, y)) return;
-      this.flow(x, y, x - d, y);
+    if (this.rand() >= p) return;
+
+    /*
+     * Finding the edge.
+     *
+     * Moving one cell sideways per step makes spreading a random walk, so the
+     * time for a pool to reach an edge grows with the SQUARE of the distance:
+     * a puddle sitting on a wide ledge takes an age to find the drop two
+     * hand-widths away, which is not how water behaves and not how it reads.
+     *
+     * Real fluid on a flat surface is driven by the pressure gradient, and the
+     * gradient points at the hole. So a cell that cannot fall looks along the
+     * surface for the nearest place it COULD fall and goes there directly.
+     * Spreading stays viscous — the probability above still gates every move —
+     * but a pool now drains at the edge rather than diffusing toward it.
+     *
+     * Reach grows with the column above, which is the pressure driving it.
+     */
+    var reach = this.flowReach + (this.head[this.idx(x, y)] >> 1);
+    if (reach > this.flowReachMax) reach = this.flowReachMax;
+
+    var nx = this.scanSide(x, y, d, reach);
+    if (nx === -1) nx = this.scanSide(x, y, -d, reach);
+    if (nx !== -1) this.flow(x, y, nx, y);
+  };
+
+  /*
+   * Look along the surface in direction d and return the best cell to move to,
+   * or -1 if there is none. Two outcomes matter, in order of preference:
+   *
+   *   a drop-off  somewhere the cell could fall from — the pressure gradient
+   *               points at the hole, so go straight to it
+   *   a slide     otherwise the furthest clear cell within reach
+   *
+   * The slide is what makes spreading travel at a speed instead of diffusing.
+   * Without it a cell only ever steps one column per turn, so the time for a
+   * pool to cross a ledge grows with the square of its width and a puddle
+   * hunts for an edge it should have found at once.
+   *
+   * The scan stops at the first obstruction either way, so fluid never tunnels
+   * through a wall to reach open space beyond it.
+   */
+  Sim.prototype.scanSide = function (x, y, d, reach) {
+    var furthest = -1;
+    for (var k = 1; k <= reach; k++) {
+      var nx = x + d * k;
+      var at = this.get(nx, y);
+      if (at === COLLECTOR || at === DRAIN) return nx; // arriving is falling
+      if (at !== EMPTY) break;
+      var below = this.get(nx, y + 1);
+      if (below === EMPTY || below === COLLECTOR || below === DRAIN) return nx;
+      furthest = nx;
     }
+    return furthest;
   };
 
   /*
