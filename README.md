@@ -60,8 +60,14 @@ has to satisfy.
 open docs/play/index.html   # drag to dig; no install needed
 
 npm install                 # only for the tests
-npm test
+npm test                    # simulation rules, no browser
+npm run test:e2e            # the game in a real browser (needs Chromium)
+npm run test:all
 ```
+
+`npm run test:e2e` drives Chromium against a local server. If Playwright has no
+browser yet, `npx playwright install chromium`; to point it at one you already
+have, set `CHROMIUM_PATH`.
 
 - `docs/play/sim.js` — the cellular simulation. DOM-free, so it runs under Node.
 - `docs/play/bodies.js` — rigid bodies and the interaction layer between the two.
@@ -70,7 +76,11 @@ npm test
 - `docs/play/vendor/planck.min.js` — the physics engine, committed so the game
   is self-contained. Refresh with `npm run vendor` after bumping the dependency;
   a test fails if the committed copy and the installed one drift apart.
-- `test/` — 35 tests.
+- `test/` — 35 rule tests, plus 17 end-to-end tests in `test/e2e/` that drive a
+  real browser. The rule tests cannot see a dead button or a service worker
+  serving a stale script, and both of those have shipped, so the browser tests
+  cover the title screen, playing, restarting, the level jump, installability,
+  offline, and cache staleness.
 
 Physics is [planck](https://piqnt.com/planck.js/), Erin Catto's Box2D ported to
 JS. We do not implement collision response, friction, restitution or solvers —

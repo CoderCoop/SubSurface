@@ -401,6 +401,51 @@
   document.getElementById('start').addEventListener('click', hideIntro);
   document.getElementById('help').addEventListener('click', showIntro);
 
+  /* --- install offer -------------------------------------------------- */
+
+  var installBtn = document.getElementById('install');
+  var iosHint = document.getElementById('ioshint');
+  var deferredPrompt = null;
+
+  function isInstalled() {
+    return (
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true
+    );
+  }
+
+  // Chromium-family browsers offer this event; taking it lets us put the
+  // install where someone is already looking rather than in a menu.
+  window.addEventListener('beforeinstallprompt', function (ev) {
+    ev.preventDefault();
+    deferredPrompt = ev;
+    if (!isInstalled()) installBtn.hidden = false;
+  });
+
+  installBtn.addEventListener('click', function () {
+    if (!deferredPrompt) return;
+    var p = deferredPrompt;
+    deferredPrompt = null;
+    installBtn.hidden = true;
+    p.prompt();
+  });
+
+  window.addEventListener('appinstalled', function () {
+    deferredPrompt = null;
+    installBtn.hidden = true;
+    iosHint.hidden = true;
+  });
+
+  // iOS has no install event and no install API, so the only honest thing is
+  // to say where the button lives. Shown only on iOS, and only when the app
+  // is not already running installed.
+  (function () {
+    var ua = navigator.userAgent;
+    var iOS = /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (iOS && !isInstalled()) iosHint.hidden = false;
+  })();
+
   /* --- input ----------------------------------------------------------- */
 
   function toGrid(ev) {
