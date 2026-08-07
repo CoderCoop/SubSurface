@@ -527,7 +527,40 @@
     };
 
     var x, y, i;
-    for (i = 0; i < sim.tint.length; i++) sim.tint[i] = Math.round(R() * 18 - 9);
+    /*
+     * Per-cell shading noise, computed once at build so it costs nothing per
+     * frame. White noise made every material look like the same TV static, so
+     * this layers two things that read as geology instead:
+     *
+     *   fine grain   per-cell speckle, the granular texture of a cut face
+     *   bedding      slow horizontal banding, the sedimentary lines you see in
+     *                a real cross-section, jittered per row so they wander
+     *
+     * The banding is the part that sells it: strata should look deposited, and
+     * horizontal streaks at varying spacing is what deposition looks like.
+     */
+    var rowShade = new Float32Array(h);
+    var drift = 0;
+    for (y = 0; y < h; y++) {
+      drift += (R() - 0.5) * 0.55;
+      if (drift > 1) drift = 1;
+      if (drift < -1) drift = -1;
+      rowShade[y] = Math.sin(y * 0.42 + drift * 2.2) * 3.4 + drift * 2.6;
+    }
+    for (y = 0; y < h; y++) {
+      // Not named `band` — that is the level-geometry helper declared below,
+      // and shadowing it here silently turns every band(0.3) into a number.
+      var bedding = rowShade[y];
+      for (x = 0; x < w; x++) {
+        var grain = R() * 9 - 4.5;
+        // A slow horizontal wobble keeps the bedding from looking ruled.
+        var wobble = Math.sin(x * 0.09 + y * 0.03) * 2.2;
+        sim.tint[y * w + x] = Math.max(
+          -24,
+          Math.min(24, Math.round(bedding + grain + wobble))
+        );
+      }
+    }
 
     // Sealed bedrock shell.
     for (y = 0; y < h; y++)
