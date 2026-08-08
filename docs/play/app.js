@@ -118,6 +118,12 @@
   // Elapsed play time for the level: accrues only while the level is live,
   // so it never counts the title screen or a finished run.
   var elapsed = 0, lastFrame = 0, clearTime = null;
+  /*
+   * Par. A level may cap how much ground you can move and how long you have.
+   * Both are optional and both are read off the level itself, so a level that
+   * sets neither plays exactly as it did before they existed.
+   */
+  var dugTotal = 0, digBudget = 0, seconds = 0;
 
   var el = {
     time: document.getElementById('time'),
@@ -132,6 +138,7 @@
     banner: document.getElementById('banner'),
     chunks: document.getElementById('chunks'),
     seed: document.getElementById('seedlabel'),
+    dig: document.getElementById('digleft'),
     next: document.getElementById('next'),
     intro: document.getElementById('intro')
   };
@@ -305,6 +312,9 @@
     bodies = new B.Bodies(sim);
     outcome = null;
     passed = false;
+    dugTotal = 0;
+    digBudget = (sim.difficulty && sim.difficulty.digBudget) | 0;
+    seconds = (sim.difficulty && sim.difficulty.seconds) | 0;
     elapsed = 0;
     clearTime = null;
     lastFrame = 0;
@@ -824,9 +834,25 @@
   /* ------------------------------------------------------------------- */
 
   function updateHud(s, ceiling) {
-    el.time.textContent = clock(clearTime === null ? elapsed : clearTime);
+    /*
+     * The clock counts down when the level sets a limit and up when it does
+     * not. Same field either way: what a player wants from it is "how am I
+     * doing for time", and that is a different number in the two cases.
+     */
+    if (seconds > 0 && clearTime === null) {
+      var left = Math.max(0, seconds - elapsed);
+      el.time.textContent = clock(left);
+      el.time.className = 'v' + (left <= 10 ? ' warn' : '');
+    } else {
+      el.time.textContent = clock(clearTime === null ? elapsed : clearTime);
+      el.time.className = 'v';
+    }
+    if (el.dig) {
+      el.dig.textContent = digBudget > 0 ? Math.max(0, digBudget - dugTotal) : '∞';
+      el.dig.className = 'v' + (digBudget > 0 && dugTotal > digBudget * 0.85 ? ' warn' : '');
+    }
     el.depth.textContent = s.depth.toFixed(0) + ' m';
-    el.pressure.textContent = s.pressure.toFixed(0);
+    if (el.pressure) el.pressure.textContent = s.pressure.toFixed(0);
     el.collected.textContent = s.collectionPct.toFixed(0) + '%';
     el.bar.style.width = Math.min(100, s.collectionPct) + '%';
     el.ceiling.style.width = Math.min(100, ceiling) + '%';
@@ -866,6 +892,33 @@
     if (outcome === 'final') return;
 
     var pct = s.collectionPct;
+
+    /*
+     * Par failures. Checked before the win so a level cannot be cleared by a
+     * unit that arrives after the clock ran out — but only while the level is
+     * unpassed, because once it is cleared the run is allowed to keep
+     * climbing toward a better grade in its own time.
+     */
+    if (!passed) {
+      if (seconds > 0 && elapsed >= seconds) {
+        outcome = 'final';
+        setBanner(
+          'fail',
+          'OUT OF TIME — ' + pct.toFixed(0) + '% collected of the ' + WIN_PCT +
+            '% needed.' + restartBtn()
+        );
+        return;
+      }
+      if (digBudget > 0 && dugTotal >= digBudget && s.inPlay === 0) {
+        outcome = 'final';
+        setBanner(
+          'fail',
+          'OUT OF GROUND — the dig is spent and ' + pct.toFixed(0) +
+            '% arrived.' + restartBtn()
+        );
+        return;
+      }
+    }
     var tier = tierFor(pct);
 
     /*
@@ -1055,8 +1108,16 @@
 
   // Cutting into fractured rock hands whole chunks to the physics world.
   function shatter(r) {
+    // Every cut goes through here, so this is the one place the budget can be
+    // counted without a caller being able to forget to.
+    dugTotal += r.removed;
     if (r.shattered.length) bodies.shatterAll(r.shattered);
     if (r.removed || r.shattered.length) bodies.markTerrainDirty();
+  }
+
+  // Whether the shovel still has anything left in it.
+  function canDig() {
+    return digBudget === 0 || dugTotal < digBudget;
   }
 
   // Spray from the cut, tinted by whatever the shovel actually took, so
@@ -1079,8 +1140,9 @@
     if (introOpen()) return;
     ev.preventDefault();
     display.setPointerCapture(ev.pointerId);
-    digging = true;
     last = cursor = toGrid(ev);
+    if (!canDig()) return; // the shovel is spent; the level plays on
+    digging = true;
     var r0 = sim.dig(last.x, last.y, DIG_RADIUS);
     shatter(r0);
     digDust(last.x, last.y, r0);
@@ -1092,6 +1154,10 @@
     cursor = p;
     if (!digging) return;
     ev.preventDefault();
+    if (!canDig()) {
+      digging = false;
+      return;
+    }
     // Interpolate, so a fast swipe cuts a continuous tunnel.
     var r1 = sim.digLine(last.x, last.y, p.x, p.y, DIG_RADIUS);
     shatter(r1);

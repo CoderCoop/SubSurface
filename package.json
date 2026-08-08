@@ -13,7 +13,8 @@
     "test": "node --test test/*.test.js",
     "test:e2e": "node --test test/e2e/*.test.js",
     "test:all": "npm test && npm run test:e2e",
-    "vendor": "node scripts/vendor.js"
+    "vendor": "node scripts/vendor.js",
+    "levels:verify": "node tools/verify-levels.js 1 20"
   },
   "dependencies": {
     "planck": "^1.5.0"
