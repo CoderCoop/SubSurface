@@ -1137,7 +1137,10 @@
    * Opening it pauses: the clock already stops while the intro is up, and the
    * overlay swallows drags, so a level cannot quietly run on behind it.
    * ------------------------------------------------------------------- */
-  var mapEl = document.getElementById('map');
+  var mapView = document.getElementById('mapview');
+  var mapScroll = document.getElementById('mapscroll');
+  var mapInner = document.getElementById('mapinner');
+  var mapUnlocked = document.getElementById('mapunlocked');
   var levelInput = document.getElementById('levelnum');
   var unlockedLabel = document.getElementById('unlocked');
   var experimental = document.getElementById('experimental');
@@ -1157,100 +1160,267 @@
   }
 
   /* ---------------------------------------------------------------------
-   * The map
+   * The tunnel map
    *
-   * A shaft in section, because that is what the game is: you go down. Each
-   * stop is a level, and beside it a swatch of the strata that level is
-   * actually built from — read off the generator rather than hard-coded, so
-   * the map cannot drift out of step with the levels it describes.
+   * A section through the workings. Levels are chambers on a passage that
+   * winds its way down, because that is what the game is about and because a
+   * ruled list of numbers told you nothing a spinner did not already.
    *
-   * It is a list of buttons, not a canvas. Levels are unbounded, so this has
-   * to scroll and virtualise anyway, and a canvas would give up tapping,
-   * keyboard focus and the screen reader for a picture that is mostly text.
+   * The passages, the strata and the rock are one SVG; the chambers are real
+   * buttons laid over it at the same coordinates. Drawing the lot into a
+   * canvas would have cost tapping, focus order and the screen reader, and
+   * bought nothing — the parts that need to be interactive are exactly the
+   * parts that an element already does well.
    * ------------------------------------------------------------------- */
-  var MAP_SWATCH = {
-    clay: '#8c4a32',
-    sand: '#c9a26b',
-    rock: '#5a6b78',
-    bedrock: '#3a3a42'
-  };
-  var mapFrom = 0; // first level currently rendered
+  var NODE_GAP = 74; // vertical pitch between chambers, in px
+  var MAP_PAD = 46; // room above the first and below the last
+  var MAP_CAP = 80; // never draw more chambers than this in one go
 
-  // What a level is made of and what makes it hard, straight from the curve.
-  function strataOf(n) {
+  /*
+   * The strata, straight out of the generator's own bands (spec §5) so the
+   * map cannot describe a game the levels are not playing.
+   */
+  var STRATA = [
+    { from: 1, to: 10, name: 'clay', fill: '#2a1a14' },
+    { from: 11, to: 20, name: 'sand', fill: '#2b2318' },
+    { from: 21, to: 30, name: 'fractured rock', fill: '#1c2328' },
+    { from: 31, to: Infinity, name: 'deep workings', fill: '#221a22' }
+  ];
+
+  function stratumOf(n) {
+    for (var i = 0; i < STRATA.length; i++)
+      if (n >= STRATA[i].from && n <= STRATA[i].to) return STRATA[i];
+    return STRATA[STRATA.length - 1];
+  }
+
+  // What each chamber is worth saying in the two characters it has room for.
+  function nodeNote(n) {
     var D = S.difficultyFor(n);
-    var bands = [MAP_SWATCH.clay];
-    if (D.sand) bands.push(MAP_SWATCH.sand);
-    if (D.fractured) bands.push(MAP_SWATCH.rock);
-    if (D.baffles > 0) bands.push(MAP_SWATCH.bedrock);
-    var note = D.fractured ? 'rock' : D.sand ? 'sand' : 'clay';
-    if (D.baffles > 0) note = D.baffles + ' gate' + (D.baffles > 1 ? 's' : '');
-    return { bands: bands, note: note };
+    if (D.baffles > 0) return D.baffles + (D.fractured ? 'r' : D.sand ? 's' : 'c');
+    return D.fractured ? 'rock' : D.sand ? 'sand' : 'clay';
   }
 
   /*
-   * Render a window of levels around the selection. Ten at a time: enough to
-   * see where you are and what is coming, few enough that jumping to level
-   * 500 in experimental mode does not build five hundred rows.
+   * Which levels to draw. Normally the whole descent so far plus the one
+   * being worked toward, because seeing the run behind you is most of the
+   * point of a map. In experimental mode there is no "so far", so it shows a
+   * window around whatever has been typed.
    */
-  function drawMap() {
-    if (!mapEl) return;
+  function mapRange() {
     var n = chosen();
-    var ceiling = pickCeiling();
-    var from = Math.max(1, n - 4);
-    // Never show a window that is all locked ground below the last unlock.
-    if (ceiling !== Infinity) from = Math.min(from, Math.max(1, unlocked - 6));
-    if (from === mapFrom && mapEl.childNodes.length) {
-      // Same window: just move the marks, so scroll position survives.
-      for (var k = 0; k < mapEl.childNodes.length; k++) {
-        var row = mapEl.childNodes[k];
-        var lv = +row.dataset.level;
-        row.className =
-          'stop' +
-          (lv < unlocked ? ' done' : '') +
-          (lv === n ? ' here' : '') +
-          (lv > ceiling ? ' locked' : '');
-        row.setAttribute('aria-selected', String(lv === n));
-      }
-      return;
+    if (experimental.checked) {
+      var from = Math.max(1, n - 6);
+      return { from: from, to: from + 15 };
     }
-    mapFrom = from;
-
-    var frag = document.createDocumentFragment();
-    for (var i = 0; i < 10; i++) {
-      var lv = from + i;
-      var st = strataOf(lv);
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.dataset.level = String(lv);
-      b.setAttribute('role', 'option');
-      b.setAttribute('aria-selected', String(lv === n));
-      b.className =
-        'stop' +
-        (lv < unlocked ? ' done' : '') +
-        (lv === n ? ' here' : '') +
-        (lv > ceiling ? ' locked' : '');
-      b.innerHTML =
-        '<i></i><b>' + lv + '</b><u>' +
-        st.bands
-          .map(function (c) {
-            return '<s style="background:' + c + '"></s>';
-          })
-          .join('') +
-        '</u><em>' + st.note + '</em>';
-      frag.appendChild(b);
-    }
-    mapEl.innerHTML = '';
-    mapEl.appendChild(frag);
+    var to = Math.min(unlocked + 1, MAP_CAP);
+    return { from: Math.max(1, Math.min(n, to) - MAP_CAP + 1), to: to };
   }
 
-  if (mapEl) {
-    // One listener on the container: the rows are rebuilt constantly.
-    mapEl.addEventListener('click', function (ev) {
-      var row = ev.target.closest ? ev.target.closest('.stop') : null;
-      if (!row || row.classList.contains('locked')) return;
-      levelInput.value = row.dataset.level;
+  function svgEl(tag, attrs) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (var k in attrs) if (attrs.hasOwnProperty(k)) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  function drawMap() {
+    if (!mapInner || mapView.hidden) return;
+    var n = chosen();
+    var ceiling = pickCeiling();
+    var r = mapRange();
+    var count = r.to - r.from + 1;
+
+    var boxW = mapScroll.clientWidth || 320;
+    var height = MAP_PAD * 2 + (count - 1) * NODE_GAP;
+    var mid = boxW / 2 + 14; // nudged right of centre to clear the stratum tags
+    var amp = Math.min(96, boxW * 0.28);
+
+    // Where each chamber sits. A wander rather than a zigzag: a passage that
+    // alternates left-right on a fixed beat reads as decoration, one that
+    // drifts reads as something that had to get around the rock.
+    var pts = [];
+    for (var i = 0; i < count; i++) {
+      var lv = r.from + i;
+      var swing = Math.sin(i * 0.85) * 0.72 + Math.sin(i * 0.37 + 1.7) * 0.42;
+      pts.push({
+        level: lv,
+        x: mid + swing * amp,
+        y: MAP_PAD + i * NODE_GAP
+      });
+    }
+
+    var svg = svgEl('svg', {
+      width: boxW,
+      height: height,
+      viewBox: '0 0 ' + boxW + ' ' + height
+    });
+
+    // Strata behind everything, one band per run of levels in the same stage.
+    var bandStart = 0;
+    for (var b = 0; b <= count; b++) {
+      var same =
+        b < count && stratumOf(pts[b].level).name === stratumOf(pts[bandStart].level).name;
+      if (same) continue;
+      var st = stratumOf(pts[bandStart].level);
+      var top = bandStart === 0 ? 0 : pts[bandStart].y - NODE_GAP / 2;
+      var bot = b >= count ? height : pts[b].y - NODE_GAP / 2;
+      svg.appendChild(
+        svgEl('rect', { x: 0, y: top, width: boxW, height: bot - top, fill: st.fill })
+      );
+      // A hairline where one stratum meets the next, as in the game itself.
+      if (bandStart > 0)
+        svg.appendChild(
+          svgEl('line', {
+            x1: 0, y1: top, x2: boxW, y2: top,
+            stroke: '#3a2f26', 'stroke-width': 1
+          })
+        );
+      bandStart = b;
+    }
+
+    /*
+     * The passage. Drawn twice: a wide dark stroke for the rock the tunnel is
+     * cut through, then a narrower lit one for the void itself, which is what
+     * makes it read as excavated rather than as a line on a chart.
+     */
+    var d = '';
+    for (var p = 0; p < pts.length; p++) {
+      if (p === 0) {
+        d += 'M ' + pts[p].x.toFixed(1) + ' ' + (pts[p].y - MAP_PAD * 0.6).toFixed(1);
+        d += ' L ' + pts[p].x.toFixed(1) + ' ' + pts[p].y.toFixed(1);
+        continue;
+      }
+      var a = pts[p - 1],
+        c = pts[p];
+      var my = (a.y + c.y) / 2;
+      // Two control points, so the passage leaves one chamber and arrives at
+      // the next vertically and does its turning in between.
+      d +=
+        ' C ' + a.x.toFixed(1) + ' ' + my.toFixed(1) +
+        ', ' + c.x.toFixed(1) + ' ' + my.toFixed(1) +
+        ', ' + c.x.toFixed(1) + ' ' + c.y.toFixed(1);
+    }
+    var last = pts[pts.length - 1];
+    d += ' L ' + last.x.toFixed(1) + ' ' + (last.y + MAP_PAD * 0.6).toFixed(1);
+
+    svg.appendChild(
+      svgEl('path', {
+        d: d, fill: 'none', stroke: '#0d0b09',
+        'stroke-width': 20, 'stroke-linecap': 'round'
+      })
+    );
+    // The part already dug reads teal; the part beyond the gate stays dark.
+    var reached = Math.max(0, Math.min(count - 1, unlocked - r.from));
+    svg.appendChild(
+      svgEl('path', {
+        d: d, fill: 'none', stroke: '#2a221b',
+        'stroke-width': 9, 'stroke-linecap': 'round'
+      })
+    );
+    if (reached > 0) {
+      var dd = '';
+      for (var q = 0; q <= reached; q++) {
+        var pt = pts[q];
+        if (q === 0) {
+          dd += 'M ' + pt.x.toFixed(1) + ' ' + (pt.y - MAP_PAD * 0.6).toFixed(1);
+          dd += ' L ' + pt.x.toFixed(1) + ' ' + pt.y.toFixed(1);
+          continue;
+        }
+        var pa = pts[q - 1],
+          pmy = (pa.y + pt.y) / 2;
+        dd +=
+          ' C ' + pa.x.toFixed(1) + ' ' + pmy.toFixed(1) +
+          ', ' + pt.x.toFixed(1) + ' ' + pmy.toFixed(1) +
+          ', ' + pt.x.toFixed(1) + ' ' + pt.y.toFixed(1);
+      }
+      svg.appendChild(
+        svgEl('path', {
+          d: dd, fill: 'none', stroke: 'rgba(47,212,196,0.42)',
+          'stroke-width': 5, 'stroke-linecap': 'round'
+        })
+      );
+    }
+
+    mapInner.innerHTML = '';
+    mapInner.style.height = height + 'px';
+    mapInner.appendChild(svg);
+
+    // Stratum labels down the left edge, once per band.
+    var seen = '';
+    for (var t = 0; t < count; t++) {
+      var stn = stratumOf(pts[t].level);
+      if (stn.name === seen) continue;
+      seen = stn.name;
+      var tag = document.createElement('span');
+      tag.className = 'stratum';
+      tag.textContent = stn.name;
+      tag.style.top = Math.max(2, pts[t].y - NODE_GAP / 2 + 4) + 'px';
+      mapInner.appendChild(tag);
+    }
+
+    // The chambers.
+    for (var k = 0; k < count; k++) {
+      var lvl = pts[k].level;
+      var locked = lvl > ceiling;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.dataset.level = String(lvl);
+      btn.className =
+        'node' +
+        (lvl < unlocked ? ' done' : '') +
+        (lvl === n ? ' here' : '') +
+        (locked ? ' locked' : '');
+      btn.style.left = pts[k].x + 'px';
+      btn.style.top = pts[k].y + 'px';
+      btn.innerHTML = lvl + '<small>' + nodeNote(lvl) + '</small>';
+      btn.setAttribute(
+        'aria-label',
+        locked ? 'Level ' + lvl + ', locked' : 'Play level ' + lvl
+      );
+      if (locked) btn.disabled = true;
+      mapInner.appendChild(btn);
+    }
+
+    mapUnlocked.textContent = experimental.checked
+      ? 'no limit'
+      : unlocked === 1
+        ? 'unlocked 1'
+        : 'unlocked 1–' + unlocked;
+  }
+
+  function openMap() {
+    mapView.hidden = false;
+    drawMap();
+    // Put the chamber you are on in view rather than the top of the shaft.
+    var here = mapInner.querySelector('.node.here');
+    if (here)
+      mapScroll.scrollTop = Math.max(
+        0,
+        here.offsetTop - mapScroll.clientHeight / 2
+      );
+  }
+
+  function closeMap() {
+    mapView.hidden = true;
+  }
+
+  if (mapInner) {
+    document.getElementById('mapopen').addEventListener('click', openMap);
+    document.getElementById('mapclose').addEventListener('click', closeMap);
+    // One listener on the container: the chambers are rebuilt on every draw.
+    mapInner.addEventListener('click', function (ev) {
+      var node = ev.target.closest ? ev.target.closest('.node') : null;
+      if (!node || node.disabled) return;
+      // Tapping a chamber goes there. A map you have to back out of and then
+      // press Start on is a list with pictures.
+      var lvl = +node.dataset.level;
+      levelInput.value = String(lvl);
       syncPicker();
+      if (lvl !== seed) reset(lvl);
+      closeMap();
+      hideIntro();
+    });
+    window.addEventListener('resize', function () {
+      if (!mapView.hidden) drawMap();
     });
   }
 

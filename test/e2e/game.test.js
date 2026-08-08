@@ -143,6 +143,70 @@ test('the level selector picks a level from the title screen', async () => {
   await ctx.close();
 });
 
+test('the tunnel map opens from the title screen and plays what you tap', async () => {
+  const { ctx, page, errors } = await open();
+  assert.ok(await page.locator('#mapview').isHidden(), 'the map starts closed');
+
+  await page.locator('#mapopen').tap();
+  await page.waitForTimeout(300);
+  assert.ok(await page.locator('#mapview').isVisible());
+
+  // A chamber per level, and a passage drawn between them.
+  const nodes = await page.locator('#mapinner .node').count();
+  assert.ok(nodes >= 2, `expected chambers on the map, found ${nodes}`);
+  assert.ok(
+    (await page.locator('#mapinner svg path').count()) >= 2,
+    'the passage should be drawn as rock and void, not one flat line'
+  );
+
+  // Only level 1 is open at a standing start; the rest are sealed.
+  assert.ok(await page.locator('#mapinner .node[data-level="1"]').isEnabled());
+  assert.ok(await page.locator('#mapinner .node[data-level="2"]').isDisabled());
+
+  await page.locator('#mapinner .node[data-level="1"]').tap();
+  await page.waitForTimeout(400);
+  assert.ok(await page.locator('#mapview').isHidden(), 'tapping a chamber closes the map');
+  assert.ok(await page.locator('#intro').isHidden(), 'and starts playing it');
+  assert.strictEqual(await text(page, '#seedlabel'), 'level 1');
+  assert.deepStrictEqual(errors, []);
+  await ctx.close();
+});
+
+test('the map shows the descent so far, and reaches any level in experimental mode', async () => {
+  const { ctx, page } = await open();
+  await page.check('#experimental');
+  await page.fill('#levelnum', '40');
+  await page.locator('#mapopen').tap();
+  await page.waitForTimeout(300);
+
+  assert.strictEqual(await text(page, '#mapunlocked'), 'no limit');
+  // A window around where you are, not the first forty levels.
+  const levels = await page.locator('#mapinner .node').evaluateAll((els) =>
+    els.map((e) => +e.dataset.level)
+  );
+  assert.ok(levels.includes(40), `map should reach level 40, showed ${levels[0]}–${levels[levels.length - 1]}`);
+  assert.ok(levels.every((l) => !isNaN(l)));
+  // Nothing is sealed in this mode.
+  assert.strictEqual(await page.locator('#mapinner .node[disabled]').count(), 0);
+
+  await page.locator('#mapinner .node[data-level="40"]').tap();
+  await page.waitForTimeout(500);
+  assert.strictEqual(await text(page, '#seedlabel'), 'level 40');
+  await ctx.close();
+});
+
+test('Close leaves the map without changing the level', async () => {
+  const { ctx, page } = await open();
+  await page.locator('#mapopen').tap();
+  await page.waitForTimeout(200);
+  await page.locator('#mapclose').tap();
+  await page.waitForTimeout(200);
+  assert.ok(await page.locator('#mapview').isHidden());
+  assert.ok(await page.locator('#intro').isVisible(), 'and puts you back on the title screen');
+  assert.strictEqual(await text(page, '#seedlabel'), 'level 1');
+  await ctx.close();
+});
+
 // ---------------------------------------------------------------------------
 // Playing
 // ---------------------------------------------------------------------------
