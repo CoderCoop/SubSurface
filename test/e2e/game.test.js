@@ -29,6 +29,33 @@ async function open(opts = PHONE) {
 }
 
 /*
+ * Choose a level the way a player now has to: on the map. Experimental mode
+ * must already be on for anything past the unlock, since the map seals the
+ * rest and a sealed chamber is not clickable.
+ */
+async function pickOnMap(page, level) {
+  if (await page.locator('#intro').isHidden()) {
+    await page.locator('#menu').tap();
+    await page.waitForTimeout(200);
+  }
+  await page.locator('#mapopen').tap();
+  await page.waitForTimeout(250);
+  let node = page.locator(`#mapinner .node[data-level="${level}"]`);
+  if (!(await node.count())) {
+    // Out of the window the map is showing: jump to it, which is what the
+    // field in the map header is for.
+    await page.fill('#jumpto', String(level));
+    await page.locator('#jumpgo').tap();
+    await page.waitForTimeout(250);
+    node = page.locator(`#mapinner .node[data-level="${level}"]`);
+  }
+  if (!(await node.count())) throw new Error('level ' + level + ' is not on the map');
+  await node.scrollIntoViewIfNeeded();
+  await node.tap();
+  await page.waitForTimeout(450);
+}
+
+/*
  * Experimental mode and the reference cut live on the title screen, which is
  * also the menu. Reaching them from a running level means opening the menu
  * first — and #solve starts the selected level before it cuts, so this works
@@ -118,27 +145,13 @@ test('Menu reopens the title screen, and leaving it does not restart', async () 
   await ctx.close();
 });
 
-test('the level selector picks a level from the title screen', async () => {
+test('the title screen has no level field of its own — the map is the picker', async () => {
   const { ctx, page } = await open();
-  // Locked levels are out of reach: the selector clamps to what is unlocked.
-  await page.fill('#levelnum', '9');
-  await page.locator('#start').tap();
-  await page.waitForTimeout(400);
-  assert.strictEqual(await text(page, '#seedlabel'), 'level 1');
-
-  // And the steppers cannot walk past the gate either — the + is simply not
-  // available at the ceiling, rather than available and then ignored.
-  await page.locator('#menu').tap();
-  await page.waitForTimeout(200);
-  assert.ok(
-    await page.locator('#levelplus').isDisabled(),
-    'the selector should stop at the last unlocked level'
-  );
-  assert.ok(
-    await page.locator('#levelminus').isDisabled(),
-    'and at level 1 going down'
-  );
-  assert.strictEqual(await page.inputValue('#levelnum'), '1');
+  assert.strictEqual(await page.locator('#levelnum').count(), 0);
+  assert.strictEqual(await page.locator('#levelplus').count(), 0);
+  // What it does show is where you are, and the way to change it.
+  assert.strictEqual(await text(page, '#levelnow'), 'Level 1');
+  assert.ok(await page.locator('#mapopen').isVisible());
   assert.strictEqual(await text(page, '#unlocked'), 'unlocked 1');
   await ctx.close();
 });
@@ -175,7 +188,6 @@ test('the tunnel map opens from the title screen and plays what you tap', async 
 test('the map shows the descent so far, and reaches any level in experimental mode', async () => {
   const { ctx, page } = await open();
   await page.check('#experimental');
-  await page.fill('#levelnum', '40');
   await page.locator('#mapopen').tap();
   await page.waitForTimeout(300);
 
@@ -184,14 +196,15 @@ test('the map shows the descent so far, and reaches any level in experimental mo
   const levels = await page.locator('#mapinner .node').evaluateAll((els) =>
     els.map((e) => +e.dataset.level)
   );
-  assert.ok(levels.includes(40), `map should reach level 40, showed ${levels[0]}–${levels[levels.length - 1]}`);
+  assert.ok(levels.length >= 8, `expected a window of chambers, got ${levels.length}`);
   assert.ok(levels.every((l) => !isNaN(l)));
   // Nothing is sealed in this mode.
   assert.strictEqual(await page.locator('#mapinner .node[disabled]').count(), 0);
 
-  await page.locator('#mapinner .node[data-level="40"]').tap();
+  const far = levels[levels.length - 1];
+  await page.locator(`#mapinner .node[data-level="${far}"]`).tap();
   await page.waitForTimeout(500);
-  assert.strictEqual(await text(page, '#seedlabel'), 'level 40');
+  assert.strictEqual(await text(page, '#seedlabel'), 'level ' + far);
   await ctx.close();
 });
 
@@ -281,9 +294,7 @@ test('the sand band shows up in its own stage band, and swallows a shaft', async
   // levels genuinely differ, so this has to go and look at one that has sand.
   const { ctx, page } = await open();
   await page.check('#experimental');
-  await page.fill('#levelnum', '15');
-  await page.locator('#start').tap();
-  await page.waitForTimeout(400);
+  await pickOnMap(page, 15);
   assert.strictEqual(await text(page, '#seedlabel'), 'level 15');
 
   /*
@@ -432,9 +443,7 @@ test('experimental mode goes past the gate, and is remembered', async () => {
   const page = await ctx.newPage();
   await page.goto(base, { waitUntil: 'load' });
   await page.check('#experimental');
-  await page.fill('#levelnum', '30');
-  await page.locator('#start').tap();
-  await page.waitForTimeout(500);
+  await pickOnMap(page, 30);
   assert.strictEqual(await text(page, '#seedlabel'), 'level 30');
 
   // Someone who turned it on is debugging; resetting it every reload is a bug.
@@ -461,16 +470,11 @@ test('experimental mode is off by default, then jumps to any level', async () =>
   assert.ok(await page.locator('#solve').isVisible());
   assert.strictEqual(await text(page, '#unlocked'), 'no limit');
 
-  await page.fill('#levelnum', '42');
-  await page.locator('#start').tap();
-  await page.waitForTimeout(500);
+  await pickOnMap(page, 42);
   assert.strictEqual(await text(page, '#seedlabel'), 'level 42');
 
   // Nothing is gated in this mode, so a far one has to build too.
-  await page.locator('#menu').tap();
-  await page.fill('#levelnum', '500');
-  await page.locator('#start').tap();
-  await page.waitForTimeout(500);
+  await pickOnMap(page, 500);
   assert.strictEqual(await text(page, '#seedlabel'), 'level 500');
   await ctx.close();
 });

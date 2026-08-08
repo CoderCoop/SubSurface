@@ -1207,7 +1207,10 @@
   var mapScroll = document.getElementById('mapscroll');
   var mapInner = document.getElementById('mapinner');
   var mapUnlocked = document.getElementById('mapunlocked');
-  var levelInput = document.getElementById('levelnum');
+  var levelNow = document.getElementById('levelnow');
+  // The number field and its steppers are gone: the map is the picker. What
+  // is left is a chosen level, which the map sets and the title card shows.
+  var levelInput = { value: '1' };
   var unlockedLabel = document.getElementById('unlocked');
   var experimental = document.getElementById('experimental');
   var solveBtn = document.getElementById('solve');
@@ -1320,6 +1323,28 @@
       viewBox: '0 0 ' + boxW + ' ' + height
     });
 
+    /*
+     * Hatching, the way a section drawing marks cut ground. One pattern
+     * definition reused across every stratum, tinted by the band it fills, so
+     * the rock has texture without the map carrying an image.
+     */
+    var defs = svgEl('defs', {});
+    var pat = svgEl('pattern', {
+      id: 'maprock',
+      width: 9,
+      height: 9,
+      patternUnits: 'userSpaceOnUse',
+      patternTransform: 'rotate(35)'
+    });
+    pat.appendChild(
+      svgEl('line', {
+        x1: 0, y1: 0, x2: 0, y2: 9,
+        stroke: 'rgba(255,241,214,0.05)', 'stroke-width': 1.4
+      })
+    );
+    defs.appendChild(pat);
+    svg.appendChild(defs);
+
     // Strata behind everything, one band per run of levels in the same stage.
     var bandStart = 0;
     for (var b = 0; b <= count; b++) {
@@ -1331,6 +1356,11 @@
       var bot = b >= count ? height : pts[b].y - NODE_GAP / 2;
       svg.appendChild(
         svgEl('rect', { x: 0, y: top, width: boxW, height: bot - top, fill: st.fill })
+      );
+      svg.appendChild(
+        svgEl('rect', {
+          x: 0, y: top, width: boxW, height: bot - top, fill: 'url(#maprock)'
+        })
       );
       // A hairline where one stratum meets the next, as in the game itself.
       if (bandStart > 0)
@@ -1368,10 +1398,22 @@
     var last = pts[pts.length - 1];
     d += ' L ' + last.x.toFixed(1) + ' ' + (last.y + MAP_PAD * 0.6).toFixed(1);
 
+    /*
+     * The passage, in three strokes rather than two: the wall it is cut
+     * through, a lighter line along the top of the void where light would
+     * catch the roof, and the void itself. Three is what turns a stroke into
+     * something with a near side and a far side.
+     */
     svg.appendChild(
       svgEl('path', {
-        d: d, fill: 'none', stroke: '#0d0b09',
-        'stroke-width': 20, 'stroke-linecap': 'round'
+        d: d, fill: 'none', stroke: '#0a0806',
+        'stroke-width': 22, 'stroke-linecap': 'round'
+      })
+    );
+    svg.appendChild(
+      svgEl('path', {
+        d: d, fill: 'none', stroke: 'rgba(214,196,168,0.12)',
+        'stroke-width': 15, 'stroke-linecap': 'round'
       })
     );
     // The part already dug reads teal; the part beyond the gate stays dark.
@@ -1409,6 +1451,15 @@
     mapInner.innerHTML = '';
     mapInner.style.height = height + 'px';
     mapInner.appendChild(svg);
+
+    // A depth scale down the right edge, as a section drawing would carry.
+    for (var t2 = 0; t2 < count; t2 += 5) {
+      var tick = document.createElement('span');
+      tick.className = 'depthtick';
+      tick.innerHTML = '<s></s>' + (pts[t2].level * 10) + 'm';
+      tick.style.top = pts[t2].y - 6 + 'px';
+      mapInner.appendChild(tick);
+    }
 
     // Stratum labels down the left edge, once per band.
     var seen = '';
@@ -1454,6 +1505,11 @@
   }
 
   function openMap() {
+    var jump = document.getElementById('mapjump');
+    if (jump) {
+      jump.hidden = !experimental.checked;
+      document.getElementById('jumpto').value = String(chosen());
+    }
     mapView.hidden = false;
     drawMap();
     // Put the chamber you are on in view rather than the top of the shaft.
@@ -1485,6 +1541,19 @@
       closeMap();
       hideIntro();
     });
+    var goJump = function () {
+      var n = parseInt(document.getElementById('jumpto').value, 10);
+      if (!isFinite(n) || n < 1) return;
+      levelInput.value = String(n);
+      syncPicker();
+      var here = mapInner.querySelector('.node.here');
+      if (here)
+        mapScroll.scrollTop = Math.max(0, here.offsetTop - mapScroll.clientHeight / 2);
+    };
+    document.getElementById('jumpgo').addEventListener('click', goJump);
+    document.getElementById('jumpto').addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') goJump();
+    });
     window.addEventListener('resize', function () {
       if (!mapView.hidden) drawMap();
     });
@@ -1492,31 +1561,18 @@
 
   function syncPicker() {
     var n = chosen();
-    if (String(n) !== levelInput.value) levelInput.value = n;
-    levelInput.max = experimental.checked ? '' : String(unlocked);
-    unlockedLabel.textContent = experimental.checked
+    if (String(n) !== levelInput.value) levelInput.value = String(n);
+    var label = experimental.checked
       ? 'no limit'
       : unlocked === 1
         ? 'unlocked 1'
         : 'unlocked 1–' + unlocked;
-    document.getElementById('levelminus').disabled = n <= 1;
-    document.getElementById('levelplus').disabled = n >= pickCeiling();
+    if (unlockedLabel) unlockedLabel.textContent = label;
+    if (levelNow) levelNow.textContent = 'Level ' + n;
     solveBtn.hidden = !experimental.checked;
     startBtn.textContent = n === seed ? 'Start digging' : 'Play level ' + n;
     drawMap();
   }
-
-  function nudge(by) {
-    levelInput.value = String(Math.max(1, Math.min(pickCeiling(), chosen() + by)));
-    syncPicker();
-  }
-  document.getElementById('levelminus').addEventListener('click', function () {
-    nudge(-1);
-  });
-  document.getElementById('levelplus').addEventListener('click', function () {
-    nudge(1);
-  });
-  levelInput.addEventListener('input', syncPicker);
 
   /*
    * Experimental mode is remembered, because someone who turned it on is
