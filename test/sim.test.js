@@ -620,3 +620,85 @@ test('fluid never crosses a wall to find a hole on the other side', () => {
         `fluid reached x=${x}, y=${y} through a solid wall`
       );
 });
+
+// ---------------------------------------------------------------------------
+// Gravel — the material you can build with
+// ---------------------------------------------------------------------------
+
+test('gravel settles into a heap and stays put once it has', () => {
+  const sim = blank(48, 40);
+  for (let x = 1; x < 47; x++) put(sim, x, 34, MAT.BEDROCK);
+  for (let y = 6; y < 16; y++) for (let x = 19; x < 29; x++) put(sim, x, y, MAT.GRAVEL);
+  const grains = count(sim, MAT.GRAVEL);
+
+  run(sim, 1600);
+  const settled = [];
+  for (let x = 1; x < 47; x++) {
+    let top = 34;
+    for (let y = 0; y < 34; y++) if (sim.get(x, y) === MAT.GRAVEL) { top = y; break; }
+    settled.push(top);
+  }
+  assert.strictEqual(count(sim, MAT.GRAVEL), grains, 'grains are conserved');
+  assert.ok(settled.some((t) => t < 34), 'and end up somewhere, as a heap');
+
+  // Once at rest it has to stay at rest, or a dam is not a dam.
+  run(sim, 800);
+  for (let x = 1; x < 47; x++) {
+    let top = 34;
+    for (let y = 0; y < 34; y++) if (sim.get(x, y) === MAT.GRAVEL) { top = y; break; }
+    assert.strictEqual(top, settled[x - 1], `the heap shifted at x=${x}`);
+  }
+});
+
+test('a gravel dam holds fluid back without taking a cut of it', () => {
+  const sim = blank(50, 34);
+  for (let x = 1; x < 49; x++) put(sim, x, 28, MAT.BEDROCK);
+  for (let y = 22; y < 28; y++) for (let x = 24; x < 30; x++) put(sim, x, y, MAT.GRAVEL);
+  for (let y = 20; y < 26; y++) for (let x = 6; x < 20; x++) put(sim, x, y, MAT.WATER);
+
+  const before = count(sim, MAT.WATER);
+  const s = run(sim, 1200);
+  assert.ok(s.balanced);
+  // Sand would have soaked some of this up and reported it as held. Gravel is
+  // an obstruction and nothing else, which is the whole reason it exists.
+  assert.strictEqual(s.heldBySand, 0, 'gravel must not absorb');
+  assert.strictEqual(count(sim, MAT.WATER), before, 'and must not destroy any');
+});
+
+test('gravel can be dug, so a pocket can be dropped on purpose', () => {
+  const sim = blank(30, 30);
+  for (let y = 10; y < 16; y++) for (let x = 10; x < 16; x++) put(sim, x, y, MAT.GRAVEL);
+  const r = sim.dig(13, 13, 3);
+  assert.ok(r.removed > 0, 'the shovel has to bite');
+  assert.strictEqual(sim.get(13, 13), MAT.EMPTY);
+});
+
+test('a spec builds a level directly, without going through a level number', () => {
+  // The generator hands specs in; the game derives them from a number. Both
+  // have to reach the same builder or a banked level means something
+  // different from the level that was verified.
+  const a = buildLevel({ w: 90, h: 150, seed: 4, spec: { level: 4, seed: 4 } });
+  const b = buildLevel({ w: 90, h: 150, seed: 4, level: 4 });
+  assert.deepStrictEqual(a.geometry.route, b.geometry.route);
+
+  // And a spec may override any single dial without restating the rest.
+  const crowned = buildLevel({ w: 90, h: 150, seed: 4, spec: { level: 4, seed: 4, floorSlope: 6 } });
+  assert.strictEqual(crowned.geometry.floorSlope, 6);
+  assert.strictEqual(a.geometry.floorSlope, 0);
+});
+
+test('a crowned floor actually falls away from the crystal', () => {
+  const sim = buildLevel({ w: 120, h: 200, seed: 8, spec: { level: 8, seed: 8, floorSlope: 6 } });
+  const g = sim.geometry;
+  const depthAt = (x) => {
+    for (let y = g.floorY - 8; y < sim.h - 2; y++)
+      if (sim.get(x, y) !== MAT.EMPTY) return y;
+    return sim.h;
+  };
+  const atBasin = depthAt(Math.round((g.basinL + g.basinR) / 2));
+  const outside = depthAt(Math.max(g.wall + 1, g.basinL - g.apron - 2));
+  assert.ok(
+    outside > atBasin,
+    `floor beside the basin (${outside}) should sit lower than at it (${atBasin})`
+  );
+});

@@ -42,7 +42,8 @@
     WATER = 5,
     COLLECTOR = 6,
     DRAIN = 7,
-    FRACTURED = 8;
+    FRACTURED = 8,
+    GRAVEL = 9;
 
   var MAT = {
     EMPTY: EMPTY,
@@ -53,7 +54,8 @@
     WATER: WATER,
     COLLECTOR: COLLECTOR,
     DRAIN: DRAIN,
-    FRACTURED: FRACTURED
+    FRACTURED: FRACTURED,
+    GRAVEL: GRAVEL
   };
 
   var NAMES = {};
@@ -66,6 +68,7 @@
   NAMES[COLLECTOR] = 'collector';
   NAMES[DRAIN] = 'drain';
   NAMES[FRACTURED] = 'fractured rock';
+  NAMES[GRAVEL] = 'gravel';
 
   // Earthy, muted terrain against a vibrant teal payload (spec §3.1).
   var COLORS = {};
@@ -78,6 +81,7 @@
   COLORS[COLLECTOR] = [246, 232, 160];
   COLORS[DRAIN] = [12, 10, 8];
   COLORS[FRACTURED] = [90, 107, 120];
+  COLORS[GRAVEL] = [122, 116, 102];
 
   // Deterministic PRNG: same seed means the same run, which is what makes the
   // integration tests meaningful and lets a level be replayed exactly.
@@ -481,10 +485,26 @@
       return;
     }
 
-    // Angle of repose: a grain only slides diagonally when it loses its
-    // cohesion roll. Wet sand sticks together far more (spec §2.3), so a
-    // soaked band slumps into a steeper, more stable pile than a dry one.
-    var stick = mat === WETSAND ? 0.78 : 0.28;
+    /*
+     * Angle of repose: a grain only slides diagonally when it loses its
+     * cohesion roll. Wet sand sticks together far more (spec §2.3), so a
+     * soaked band slumps into a steeper, more stable pile than a dry one.
+     *
+     * Gravel is slower to relax than dry sand and — the point of it — does
+     * not drink. Sand can be dropped into a channel to block it, but a sand
+     * dam is also a sponge: it takes a cut of the payload it is holding back.
+     * Gravel holds the line for free, which is what makes collapsing a pocket
+     * into the floor a strategy rather than a trade.
+     *
+     * Note what cohesion is and is not. It is the chance a grain declines to
+     * slide on a given step, so it governs how fast a heap relaxes, not the
+     * angle it relaxes to — given long enough, dry sand and gravel settle to
+     * the same shape. Only wet sand differs in the end state, because 0.78 is
+     * high enough to freeze a slope for the length of a level. A real angle of
+     * repose would need a rule about height difference rather than a die roll,
+     * and this is not one.
+     */
+    var stick = mat === WETSAND ? 0.78 : mat === GRAVEL ? 0.62 : 0.28;
     if (this.rand() < stick) return;
 
     var d = this.rand() < 0.5 ? 1 : -1;
@@ -523,6 +543,7 @@
         else if (m === WETSAND) {
           if (!this.tryRelease(x, y)) this.updateSand(x, y, WETSAND);
         } else if (m === SAND) this.updateSand(x, y, SAND);
+        else if (m === GRAVEL) this.updateSand(x, y, GRAVEL);
       }
     }
   };
@@ -553,10 +574,10 @@
         if (dx * dx + dy * dy > r2) continue;
         var i = y * this.w + x;
         var m = this.cells[i];
-        if (m === CLAY || m === SAND) {
+        if (m === CLAY || m === SAND || m === GRAVEL) {
           this.cells[i] = EMPTY;
           removed++;
-          if (m === SAND) grit++;
+          if (m !== CLAY) grit++;
         } else if (m === WETSAND) {
           // Hand the held unit back rather than destroying it.
           this.cells[i] = WATER;
@@ -778,8 +799,68 @@
        * is the puzzle.
        */
       baffles: n < 4 ? 0 : n < 14 ? 1 : 2,
-      baffleReach: 0.2 + 0.16 * within(4, 40) + 0.04 * late
+      baffleReach: 0.2 + 0.16 * within(4, 40) + 0.04 * late,
+
+      /*
+       * The cavern floor can tilt. A column that lands off the crystal then
+       * runs downhill instead of sitting where it fell, which turns a near
+       * miss from "most of it survives" into "all of it is going somewhere",
+       * and makes what you put in its way matter.
+       */
+      floorSlope: 0,
+      /*
+       * How far the lane tucks in under the last shelf before dropping.
+       *
+       * This is the dial that decides whether a level is a puzzle. With the
+       * lane leaving a shelf and going straight down, a shaft dropped on the
+       * basin never meets the shelf and the answer is "drag down here" — the
+       * solver confirmed it, clearing level after level with one naive drop.
+       * Tuck the lane back under the shelf and a straight drop onto the basin
+       * hits uncuttable bedrock, while a straight drop through the open side
+       * lands wide of the crystal. The route has to come down past the shelf
+       * and then back under it, and there is no version of that which is one
+       * straight line.
+       */
+      tuck: 0,
+      /*
+       * Par for the level: how much ground may be moved, and how long there
+       * is. Zero means unlimited, which is what every level derived from a
+       * number gets — these are for banked levels, where the generator has
+       * measured what its own solution costs and can set a budget that leaves
+       * room to think but not room to excavate the whole cross-section.
+       */
+      digBudget: 0,
+      seconds: 0,
+      /*
+       * Gravel pockets hanging in the clay above the cavern. Cut the clay out
+       * from under one and it drops, piles up on the floor, and dams it —
+       * which is the most interesting thing in the game to do on purpose, and
+       * impossible to do by accident.
+       */
+      gravel: 0,
+      // A bedrock column standing on the cavern floor, splitting what lands.
+      pillar: 0
     };
+  }
+
+  /*
+   * Fill in whatever a spec does not say. The generator only writes the dials
+   * it wants to vary, so everything else has to have an answer — and a spec
+   * that omits a field must build the same level tomorrow, which is why the
+   * pick stream is rebuilt from the seed rather than left undefined.
+   */
+  function withDefaults(spec) {
+    var base = difficultyFor(spec.level || 1);
+    var out = {};
+    for (var k in base) if (base.hasOwnProperty(k)) out[k] = base[k];
+    for (var j in spec) if (spec.hasOwnProperty(j)) out[j] = spec[j];
+    if (typeof out.pick !== 'function') {
+      var salt = (spec.seed === undefined ? spec.level || 1 : spec.seed) | 0;
+      out.pick = function (n) {
+        return mulberry32(Math.imul(salt, 92837111) + Math.imul(n, 689287499))();
+      };
+    }
+    return out;
   }
 
   function buildLevel(opts) {
@@ -787,7 +868,14 @@
     var w = opts.w || 120,
       h = opts.h || 200;
     var level = opts.level === undefined ? opts.seed : opts.level;
-    var D = difficultyFor(level === undefined ? 1 : level);
+    /*
+     * A level is a spec. difficultyFor() derives one from a level number,
+     * which is how the game got its levels before there was a bank; the
+     * generator hands one in directly. Same builder either way, so a banked
+     * level and a derived one cannot diverge in how they are interpreted.
+     */
+    var D = opts.spec || difficultyFor(level === undefined ? 1 : level);
+    if (!D.pick) D = withDefaults(D);
     var sim = new Sim(w, h, opts.seed === undefined ? 1 : opts.seed);
     sim.difficulty = D;
     var R = mulberry32((opts.seed === undefined ? 1 : opts.seed) * 31 + 7);
@@ -960,7 +1048,12 @@
      * So the lane crosses the level above the sand, then runs straight down
      * through the band and on to the basin without another corner in it.
      */
-    var zones = [[sealTop + Math.round(0.02 * h), bandTop - Math.round(0.03 * h)]];
+    /*
+     * Shelves stop well above the sand band, so there is clay to do the
+     * tucking in. The traverse under a shelf has to happen somewhere, and it
+     * cannot happen in the band — sand slumps into a diagonal and seals it.
+     */
+    var zones = [[sealTop + Math.round(0.02 * h), bandTop - Math.round(0.1 * h)]];
     if (D.baffles > 0) {
       var reachW = Math.max(6, Math.round(D.baffleReach * w));
       var firstLeft = D.pick(50) < 0.5;
@@ -1010,8 +1103,22 @@
       lane.push({ y: baffleY[q] - 2, x: wpx });
       lane.push({ y: baffleY[q] + baffleThick + 2, x: wpx });
     }
-    // Vertical from the top of the sand band to the floor: one x, no corners.
+    /*
+     * Where the lane crosses the sand band, and therefore where the basin is.
+     * With tuck it slides back under the last shelf, so the only way down to
+     * the crystal is around the shelf and back in beneath it.
+     */
     if (bandLane === null) bandLane = Math.round(corridorC * w);
+    else if (D.tuck > 0 && baffleShelf.length) {
+      var lastShelf = baffleShelf[baffleShelf.length - 1];
+      // A point inside the shelf's own span, never right at its lip.
+      var deep = lastShelf[0] < bandLane
+        ? lastShelf[1] - 3 - Math.round((lastShelf[1] - lastShelf[0] - 6) * D.tuck)
+        : lastShelf[0] + 3 + Math.round((lastShelf[1] - lastShelf[0] - 6) * D.tuck);
+      var loX = WALL + halfW,
+        hiX = w - WALL - halfW - 1;
+      bandLane = Math.max(loX, Math.min(hiX, deep));
+    }
     lane.push({ y: bandTop, x: bandLane });
     lane.push({ y: h, x: bandLane });
     lane.sort(function (u, v) {
@@ -1146,33 +1253,101 @@
         }
     }
 
+    /*
+     * Gravel pockets, hung in the clay just above the cavern roof.
+     *
+     * These are the levels' one constructive move. Cut the clay out from
+     * under a pocket and the gravel drops into the cavern, piles up on the
+     * floor and dams it — so a drain can be walled off, or a tilted floor
+     * given a lip to hold the payload against. Gravel is used rather than
+     * sand because a sand dam is also a sponge: it takes a cut of whatever it
+     * holds back, and a move whose reward is eaten by its own cost is not a
+     * move anyone makes twice.
+     *
+     * They sit clear of the lane, because a pocket that collapses into the
+     * route on its own is a hazard, and the point of these is that nothing
+     * happens until you decide it should.
+     */
+    var gravelAt = [];
+    for (var gI = 0; gI < (D.gravel | 0); gI++) {
+      var gy = cavernTop - Math.round((0.03 + 0.04 * D.pick(80 + gI)) * h);
+      var gr = Math.round((0.045 + 0.03 * D.pick(90 + gI)) * w);
+      var gLane = laneX[Math.max(0, Math.min(h - 1, gy))];
+      /*
+       * Placed in the room that exists rather than sampled and rejected. The
+       * lane is wide, so picking an x at random and dropping the pocket when
+       * it clashed meant most levels quietly got no pockets at all — the
+       * feature looked implemented and did nothing.
+       */
+      var leftRoom = gLane - halfW - 2 - (WALL + gr),
+        rightRoom = w - WALL - gr - (gLane + halfW + 2);
+      var goLeft =
+        leftRoom > rightRoom ? true : rightRoom > leftRoom ? false : D.pick(70 + gI) < 0.5;
+      if (goLeft && leftRoom < gr) goLeft = false;
+      if (!goLeft && rightRoom < gr) goLeft = true;
+      var lo = goLeft ? WALL + gr : gLane + halfW + 2 + gr,
+        hi = goLeft ? gLane - halfW - 2 - gr : w - WALL - gr;
+      if (hi <= lo) continue; // genuinely nowhere for it to hang
+      var gx = Math.round(lo + (hi - lo) * (0.25 + 0.5 * D.pick(70 + gI)));
+      gravelAt.push([gx, gy, gr]);
+      for (y = gy - gr; y <= gy + gr; y++)
+        for (x = gx - gr; x <= gx + gr; x++) {
+          if (x < WALL || x >= w - WALL || y < 0 || y >= h) continue;
+          var gdx = x - gx,
+            gdy = y - gy;
+          if (gdx * gdx + gdy * gdy > gr * gr) continue;
+          // Decorative sand pockets are scenery and may be overwritten; a
+          // shelf or a scored slab may not, or the pocket punches a hole in
+          // something the level is relying on.
+          var was = sim.get(x, y);
+          if (was === CLAY || was === SAND) sim.set(x, y, GRAVEL);
+        }
+    }
+
     // Open cavern beneath the clay.
     for (y = cavernTop; y < floorY; y++)
       for (x = WALL; x < w - WALL; x++) sim.set(x, y, EMPTY);
-
-    // Cavern floor: bedrock, except the collector basin at centre and a drain
-    // at each far edge. Land the column off-centre and the payload runs to the
-    // drains instead of the crystal.
-    for (y = floorY; y < h - 2; y++)
-      for (x = WALL; x < w - WALL; x++) sim.set(x, y, BEDROCK);
 
     /*
      * The basin sits under the corridor, so the route always ends somewhere.
      * Flanking it is an apron of bedrock: land the column on the apron and the
      * fluid still runs home, so a near miss costs time rather than the level.
      * Everything beyond the apron is drain.
-     *
-     * The apron is the difficulty dial that matters most. Early levels give a
-     * wide one and forgive a sloppy aim; late levels shave it to a few cells,
-     * and a column that lands off the crystal is simply gone.
      */
     var basinHalf = Math.max(4, Math.round((D.basin * D.corridor * w) / 2));
     var basinC = laneX[Math.min(h - 1, floorY)];
     var basinL = Math.max(WALL + 1, basinC - basinHalf),
       basinR = Math.min(w - WALL - 2, basinC + basinHalf),
       basinBot = Math.min(h - 3, floorY + Math.round(0.05 * h));
-    for (y = floorY; y <= basinBot; y++)
-      for (x = basinL; x <= basinR; x++) sim.set(x, y, COLLECTOR);
+    var apron = Math.max(4, Math.round(D.apron * w));
+
+    /*
+     * The cavern floor. Bedrock, except the basin and the drains either side.
+     *
+     * It can be crowned: highest at the crystal and falling away to each side,
+     * so a column landing beside the basin runs downhill and away rather than
+     * sitting where it fell and trickling home.
+     *
+     * This is now the dial that decides whether aim matters, and it exists
+     * because of a change to the fluid rules. Teaching a pooled sheet to find
+     * an edge — which it badly needed — also made it very good at finding the
+     * crystal from a long way off, and the solver duly reported a straight
+     * drop clearing almost every level from almost anywhere. A flat floor
+     * forgives everything now. A crowned one does not, and it is also what
+     * makes a gravel dam worth building: a pile in the right place gives the
+     * payload a lip to catch against.
+     */
+    var slope = D.floorSlope | 0;
+    var floorAt = function (px) {
+      if (!slope) return floorY;
+      var off = px < basinL ? basinL - px : px > basinR ? px - basinR : 0;
+      return floorY + Math.round(slope * Math.min(1, off / Math.max(1, apron)));
+    };
+    for (x = WALL; x < w - WALL; x++)
+      for (y = floorAt(x); y < h - 2; y++) sim.set(x, y, BEDROCK);
+
+    for (x = basinL; x <= basinR; x++)
+      for (y = floorAt(x); y <= basinBot; y++) sim.set(x, y, COLLECTOR);
 
     /*
      * The drains are whatever floor is left. Cut into mouths of bounded width
@@ -1180,7 +1355,6 @@
      * level wide reads as a background, not as a hazard — and the ribs change
      * nothing: fluid landing on one still runs into a drain either way.
      */
-    var apron = Math.max(4, Math.round(D.apron * w));
     var mouth = Math.max(4, Math.round(0.12 * w)),
       rib = Math.max(2, Math.round(0.02 * w));
     var drains = [];
@@ -1194,8 +1368,8 @@
     cut(WALL, basinL - apron - 1);
     cut(basinR + apron + 1, w - WALL - 1);
     for (var dI = 0; dI < drains.length; dI++)
-      for (y = floorY; y < h - 2; y++)
-        for (x = drains[dI][0]; x <= drains[dI][1]; x++) sim.set(x, y, DRAIN);
+      for (x = drains[dI][0]; x <= drains[dI][1]; x++)
+        for (y = floorAt(x); y < h - 2; y++) sim.set(x, y, DRAIN);
 
     // Reservoir: fluid resting on the clay seal, with headroom above it.
     var waterTop = band(0.12);
@@ -1225,6 +1399,8 @@
       basinR: basinR,
       basinBot: basinBot,
       drains: drains,
+      gravelAt: gravelAt,
+      floorSlope: slope,
       centreX: Math.round(w / 2),
       // Down the clay corridor and into the basin, wherever it has drifted to.
       routeX: Math.round((basinL + basinR) / 2),
