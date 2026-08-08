@@ -343,9 +343,24 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 9px;
-        padding: 10px;
-        font-size: 0.66rem;
+        gap: 11px;
+        padding: 11px;
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .maplink b {
+        display: block;
+        font-size: 0.86rem;
+        font-weight: 400;
+        letter-spacing: 0.04em;
+      }
+      .maplink em {
+        display: block;
+        font-style: normal;
+        font-family: system-ui, sans-serif;
+        font-size: 0.68rem;
+        color: var(--faint);
+        margin-top: 2px;
       }
       .maplinkicon {
         width: 15px;
@@ -403,6 +418,37 @@
         overscroll-behavior: contain;
         touch-action: pan-y;
       }
+      /* A depth scale down the right edge, as a section drawing would have. */
+      .depthtick {
+        position: absolute;
+        right: 0;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 0.48rem;
+        letter-spacing: 0.1em;
+        color: #574b3e;
+        padding-right: 6px;
+        pointer-events: none;
+      }
+      .depthtick s { width: 9px; height: 1px; background: #3a3128; text-decoration: none; }
+      .mapjump { display: flex; gap: 6px; align-items: stretch; }
+      .mapjump[hidden] { display: none; }
+      .mapjump input {
+        width: 68px;
+        font-family: var(--mono);
+        font-size: 0.74rem;
+        background: #0f0d0b;
+        color: var(--ink);
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 5px 7px;
+        -moz-appearance: textfield;
+        appearance: textfield;
+      }
+      .mapjump input::-webkit-outer-spin-button,
+      .mapjump input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+      .mapjump button { padding: 5px 10px; font-size: 0.6rem; }
       .mapinner { position: relative; }
       .mapinner svg { display: block; width: 100%; }
 
@@ -714,23 +760,9 @@
             <span class="k" id="unlocked">unlocked 1</span>
           </div>
 
-          <div class="pickrow">
-            <button id="levelminus" class="step" aria-label="Previous level">−</button>
-            <input
-              id="levelnum"
-              type="number"
-              min="1"
-              step="1"
-              value="1"
-              inputmode="numeric"
-              aria-label="Level number"
-            />
-            <button id="levelplus" class="step" aria-label="Next level">+</button>
-          </div>
-
           <button id="mapopen" class="maplink">
             <span class="maplinkicon" aria-hidden="true"></span>
-            Open the tunnel map
+            <span><b id="levelnow">Level 1</b><em>choose on the tunnel map</em></span>
           </button>
         </div>
 
@@ -771,6 +803,13 @@
       <div class="maphead">
         <h2>The workings</h2>
         <span class="k" id="mapunlocked">unlocked 1</span>
+        <!-- Only in experimental mode: the map window follows where you are,
+             so reaching level 500 needs somewhere to say 500. -->
+        <span class="mapjump" id="mapjump" hidden>
+          <input id="jumpto" type="number" min="1" step="1" inputmode="numeric"
+                 aria-label="Jump to level" />
+          <button id="jumpgo">Go</button>
+        </span>
         <button id="mapclose">Close</button>
       </div>
       <div class="mapscroll" id="mapscroll">

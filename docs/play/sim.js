@@ -821,7 +821,13 @@
        * and then back under it, and there is no version of that which is one
        * straight line.
        */
-      tuck: 0,
+      /*
+       * On from the level the first shelf appears. Measured with the solver:
+       * with it off, levels 16, 20 and 24 all fell to a straight drop; with it
+       * on, none of them do and the route wins by 5, 56 and 71 points. This is
+       * the difference between a level and a slope.
+       */
+      tuck: n >= 4 ? 1 : 0,
       /*
        * Par for the level: how much ground may be moved, and how long there
        * is. Zero means unlimited, which is what every level derived from a
@@ -1054,6 +1060,28 @@
      * cannot happen in the band — sand slumps into a diagonal and seals it.
      */
     var zones = [[sealTop + Math.round(0.02 * h), bandTop - Math.round(0.1 * h)]];
+
+    /*
+     * Where the lane crosses the sand band, and so where the basin ends up.
+     * Decided here, before the shelves, and that ordering is the whole trick.
+     *
+     * It used to be the other way round: the shelves were placed, and the lane
+     * — and with it the basin — went wherever the last shelf's opening left
+     * room. Which meant the shelf could never be over the basin, so a shaft
+     * dropped straight onto the crystal met nothing but clay and won. The
+     * solver said so: every one of the first twelve levels fell to a single
+     * naive drop.
+     *
+     * Fixing that needs the two decided together rather than one after the
+     * other, so the basin is chosen first and the last shelf is then built to
+     * hang over it.
+     */
+    var wantBasinHalf = Math.max(4, Math.round((D.basin * D.corridor * w) / 2));
+    var wantApron = Math.max(4, Math.round(D.apron * w));
+    var laneLo = WALL + halfW,
+      laneHi = w - WALL - halfW - 1;
+    var bandLane = Math.max(laneLo, Math.min(laneHi, Math.round(corridorC * w)));
+
     if (D.baffles > 0) {
       var reachW = Math.max(6, Math.round(D.baffleReach * w));
       var firstLeft = D.pick(50) < 0.5;
@@ -1066,8 +1094,34 @@
         var sTop = zone[0] + sliceH * bI;
         var by = Math.round(sTop + sliceH * (0.25 + 0.4 * D.pick(60 + bI)));
         var fromLeft = firstLeft === (bI % 2 === 0);
-        var shelfL = fromLeft ? WALL : w - WALL - reachW,
-          shelfR = fromLeft ? WALL + reachW : w - WALL;
+        var reachHere = reachW;
+
+        /*
+         * The lowest shelf is the roof over the crystal. It reaches from
+         * whichever wall the basin is nearer, far enough to cover the basin
+         * and the whole apron round it, so no straight shaft reaches the
+         * crystal or the ground that drains into it. The way in is round the
+         * open end and back underneath.
+         *
+         * Only if there is room left to get past: a shelf that spans the
+         * level is a seal, not an obstacle.
+         */
+        var lastOne = bI === D.baffles - 1 || sliceH * (bI + 2) > zone[1] - zone[0] + 1;
+        if (D.tuck > 0 && lastOne) {
+          var needLeft = bandLane + wantBasinHalf + wantApron + 3 - WALL;
+          var needRight = w - WALL - (bandLane - wantBasinHalf - wantApron - 3);
+          var minOpen = 2 * halfW + 6; // the lane still has to fit past it
+          if (needLeft <= w - 2 * WALL - minOpen) {
+            fromLeft = true;
+            reachHere = Math.max(reachW, needLeft);
+          } else if (needRight <= w - 2 * WALL - minOpen) {
+            fromLeft = false;
+            reachHere = Math.max(reachW, needRight);
+          }
+        }
+
+        var shelfL = fromLeft ? WALL : w - WALL - reachHere,
+          shelfR = fromLeft ? WALL + reachHere : w - WALL;
         var openL = fromLeft ? shelfR : WALL,
           openR = fromLeft ? w - WALL : shelfL;
         baffleY.push(by);
@@ -1089,10 +1143,8 @@
      * the sand closes in either side of wherever that path has gone.
      */
     var lane = [{ y: 0, x: Math.round(corridorC * w) }];
-    var bandLane = null;
     for (var q = 0; q < baffleY.length; q++) {
       var wpx = Math.round((baffleGapL[q] + baffleGapR[q]) / 2);
-      bandLane = wpx;
       /*
        * A waypoint above and below each shelf at the same x, so the lane
        * passes it vertically. Steering across the shelf's own rows means the
@@ -1104,20 +1156,15 @@
       lane.push({ y: baffleY[q] + baffleThick + 2, x: wpx });
     }
     /*
-     * Where the lane crosses the sand band, and therefore where the basin is.
-     * With tuck it slides back under the last shelf, so the only way down to
-     * the crystal is around the shelf and back in beneath it.
+     * Below the last shelf the lane comes back under it to the basin, which
+     * was fixed before the shelves were placed. Without shelves there is
+     * nothing to come back from and it drops where it always was.
      */
-    if (bandLane === null) bandLane = Math.round(corridorC * w);
-    else if (D.tuck > 0 && baffleShelf.length) {
-      var lastShelf = baffleShelf[baffleShelf.length - 1];
-      // A point inside the shelf's own span, never right at its lip.
-      var deep = lastShelf[0] < bandLane
-        ? lastShelf[1] - 3 - Math.round((lastShelf[1] - lastShelf[0] - 6) * D.tuck)
-        : lastShelf[0] + 3 + Math.round((lastShelf[1] - lastShelf[0] - 6) * D.tuck);
-      var loX = WALL + halfW,
-        hiX = w - WALL - halfW - 1;
-      bandLane = Math.max(loX, Math.min(hiX, deep));
+    if (!baffleY.length || !D.tuck) {
+      bandLane = Math.max(
+        laneLo,
+        Math.min(laneHi, baffleY.length ? Math.round((baffleGapL[baffleY.length - 1] + baffleGapR[baffleY.length - 1]) / 2) : bandLane)
+      );
     }
     lane.push({ y: bandTop, x: bandLane });
     lane.push({ y: h, x: bandLane });
@@ -1314,12 +1361,12 @@
      * fluid still runs home, so a near miss costs time rather than the level.
      * Everything beyond the apron is drain.
      */
-    var basinHalf = Math.max(4, Math.round((D.basin * D.corridor * w) / 2));
+    var basinHalf = wantBasinHalf;
     var basinC = laneX[Math.min(h - 1, floorY)];
     var basinL = Math.max(WALL + 1, basinC - basinHalf),
       basinR = Math.min(w - WALL - 2, basinC + basinHalf),
       basinBot = Math.min(h - 3, floorY + Math.round(0.05 * h));
-    var apron = Math.max(4, Math.round(D.apron * w));
+    var apron = wantApron;
 
     /*
      * The cavern floor. Bedrock, except the basin and the drains either side.
