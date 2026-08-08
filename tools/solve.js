@@ -141,9 +141,19 @@ function naivePlans(sim) {
     out.push({
       name: 'drop@' + x,
       naive: true,
+      x,
       cuts: [{ strokes: [{ x0: x, y0: g.sealTop - 1, x1: x, y1: g.floorY - 1 }] }]
     });
   }
+  /*
+   * Nearest the crystal first. Judging asks "does any obvious plan win", and
+   * stops at the first that does — so trying the likeliest winner first turns
+   * detecting a boring level from five simulations on average into one. Proving
+   * a level is NOT boring still costs the full set; that is the price of a
+   * negative, and it is the case that gets rarer as the levels get better.
+   */
+  const basin = (g.basinL + g.basinR) / 2;
+  out.sort((a, b) => Math.abs(a.x - basin) - Math.abs(b.x - basin));
   return out;
 }
 
