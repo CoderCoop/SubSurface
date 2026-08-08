@@ -323,104 +323,149 @@
         border-radius: 3px;
         margin-top: 2px;
       }
-      /* --- the level map --- */
+      /* --- the tunnel map --- */
       /*
-       * A shaft seen in section, which is what the game is: you go down. The
-       * scroller runs vertically, each stop is a level, and the seam down the
-       * middle is the shaft they hang off.
+       * A section through the workings, which is what a level map should be
+       * for a game about digging: the levels are chambers, the line between
+       * them is the passage that connects them, and it winds because a tunnel
+       * follows the rock rather than a ruler.
+       *
+       * The passages and strata are SVG; the chambers are real buttons laid
+       * over it. Drawing the whole thing as one canvas would have cost
+       * tapping, focus and the screen reader for no gain — the parts that
+       * need to be interactive are the parts an element does best.
        */
-      .map {
+      .maplink {
+        width: 100%;
+        margin-top: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        padding: 10px;
+        font-size: 0.66rem;
+      }
+      .maplinkicon {
+        width: 15px;
+        height: 15px;
+        flex: none;
+        border-radius: 2px;
+        border: 1px solid currentColor;
+        background:
+          linear-gradient(135deg, transparent 42%, currentColor 42%, currentColor 58%, transparent 58%);
+        opacity: 0.8;
+      }
+
+      .mapview {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        background: #100d0b;
+        display: flex;
+        flex-direction: column;
+        padding: calc(10px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right))
+          calc(10px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
+      }
+      .mapview[hidden] { display: none; }
+      .maphead {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      .maphead h2 {
+        margin: 0;
+        font-size: 0.78rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        font-weight: 400;
+        color: var(--dim);
+      }
+      .maphead .k {
+        font-size: 0.58rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .mapscroll {
+        flex: 1 1 auto;
+        min-height: 0;
         position: relative;
-        height: 168px;
         overflow-y: auto;
         overflow-x: hidden;
-        margin: 2px 0 12px;
         border: 1px solid var(--line);
-        border-radius: 6px;
-        background:
-          linear-gradient(180deg, #1a1512 0%, #120f0d 100%);
-        scrollbar-width: thin;
+        border-radius: 8px;
+        background: #17130f;
         overscroll-behavior: contain;
         touch-action: pan-y;
       }
-      /* The shaft itself, behind the stops. */
-      .map::before {
-        content: '';
+      .mapinner { position: relative; }
+      .mapinner svg { display: block; width: 100%; }
+
+      /* A chamber on the map. */
+      .node {
         position: absolute;
-        left: 34px;
-        top: 0;
-        bottom: 0;
-        width: 2px;
-        background: linear-gradient(180deg, var(--line), #241d18);
-      }
-      .stop {
-        position: relative;
+        transform: translate(-50%, -50%);
         display: flex;
+        flex-direction: column;
         align-items: center;
-        gap: 11px;
-        width: 100%;
-        border: none;
-        background: none;
-        padding: 7px 12px 7px 10px;
-        text-align: left;
-        font-family: var(--mono);
-        color: var(--dim);
-        cursor: pointer;
-        text-transform: none;
-        letter-spacing: 0;
-        border-radius: 0;
-      }
-      .stop:hover { background: rgba(47, 212, 196, 0.06); color: var(--ink); }
-      /* The bead on the shaft. Filled once cleared, hollow when merely
-         reachable, capped when it is still below where you have got to. */
-      .stop i {
-        flex: none;
-        width: 15px;
-        height: 15px;
-        margin-left: 9px;
+        justify-content: center;
+        gap: 0;
+        width: 46px;
+        height: 46px;
+        padding: 0;
         border-radius: 50%;
         border: 2px solid var(--faint);
-        background: var(--bg);
-        box-sizing: border-box;
+        background: #0d0b09;
+        color: var(--dim);
+        font-size: 0.78rem;
+        letter-spacing: 0;
+        text-transform: none;
       }
-      .stop.done i { background: var(--fluid); border-color: var(--fluid); }
-      .stop.here i {
-        border-color: var(--fluid);
-        box-shadow: 0 0 0 3px rgba(47, 212, 196, 0.22);
-      }
-      .stop.locked { cursor: not-allowed; opacity: 0.45; }
-      .stop.locked i { border-style: dashed; border-color: var(--line); }
-      .stop.locked:hover { background: none; color: var(--dim); }
-      .stop b {
-        font-size: 0.74rem;
-        font-weight: 400;
-        color: inherit;
-        min-width: 4.4em;
-      }
-      .stop.here b { color: var(--fluid); }
-      /* The strata swatch: what this level is made of, at a glance. */
-      .stop u {
-        flex: 1;
-        display: flex;
-        height: 13px;
-        border-radius: 2px;
-        overflow: hidden;
-        text-decoration: none;
-        border: 1px solid rgba(0, 0, 0, 0.35);
-      }
-      .stop u s { flex: 1; text-decoration: none; }
-      .stop em {
-        flex: none;
-        font-style: normal;
-        font-size: 0.55rem;
-        letter-spacing: 0.12em;
+      .node:hover { border-color: var(--fluid); color: var(--fluid); }
+      .node small {
+        display: block;
+        font-size: 0.44rem;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
         color: var(--faint);
-        min-width: 3.6em;
-        text-align: right;
+        margin-top: 1px;
+      }
+      .node.done {
+        border-color: var(--fluid);
+        background: #0d2320;
+        color: var(--fluid);
+      }
+      .node.here {
+        border-color: var(--fluid);
+        color: var(--fluid);
+        box-shadow: 0 0 0 4px rgba(47, 212, 196, 0.2);
+      }
+      .node.locked,
+      .node.locked:hover {
+        border-style: dashed;
+        border-color: #3a322a;
+        color: #5d5145;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+      .node.locked small { color: #4a4038; }
+
+      /* The stratum a run of levels belongs to, named down the left edge. */
+      .stratum {
+        position: absolute;
+        left: 0;
+        font-size: 0.5rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--faint);
+        padding: 3px 6px;
+        pointer-events: none;
       }
 
-      /* --- level select --- */
+      /* --- level select --- */      /* --- level select --- */
       .picker {
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -667,13 +712,6 @@
             <span class="k" id="unlocked">unlocked 1</span>
           </div>
 
-          <!-- The map. Levels are a shaft going down: each stop is a level,
-               the strata bands behind them are the materials that level
-               introduces, and the ones below the last one cleared are still
-               capped off. Drawn as a real element list rather than a canvas
-               so it stays tappable and readable to a screen reader. -->
-          <div class="map" id="map" role="listbox" aria-label="Level"></div>
-
           <div class="pickrow">
             <button id="levelminus" class="step" aria-label="Previous level">−</button>
             <input
@@ -687,6 +725,11 @@
             />
             <button id="levelplus" class="step" aria-label="Next level">+</button>
           </div>
+
+          <button id="mapopen" class="maplink">
+            <span class="maplinkicon" aria-hidden="true"></span>
+            Open the tunnel map
+          </button>
         </div>
 
         <button id="start" class="start">Start digging</button>
@@ -718,6 +761,18 @@
           Early build — no art pass, no sound. Installable and playable offline.
           <a href="../" style="color: var(--fluid)">About the project</a>
         </p>
+      </div>
+    </div>
+
+    <!-- ========================== tunnel map ========================== -->
+    <div class="mapview" id="mapview" hidden>
+      <div class="maphead">
+        <h2>The workings</h2>
+        <span class="k" id="mapunlocked">unlocked 1</span>
+        <button id="mapclose">Close</button>
+      </div>
+      <div class="mapscroll" id="mapscroll">
+        <div class="mapinner" id="mapinner"></div>
       </div>
     </div>
 
