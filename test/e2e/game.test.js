@@ -222,17 +222,31 @@ test('the sand band shows up in its own stage band, and swallows a shaft', async
   await page.waitForTimeout(400);
   assert.strictEqual(await text(page, '#seedlabel'), 'level 15');
 
-  // Well left of the corridor, straight down through the band.
-  await digDown(page, 0.3);
+  /*
+   * Aimed at the sand the level actually has, rather than at a fraction that
+   * happened to be sand when this was written. The lane moves per level and
+   * weaves; a fixed 0.3 turned out to be the safe route on this one, and the
+   * test was asserting that a clean solve fails.
+   */
+  const sandFrac = await page.evaluate(() => {
+    const g = window.__subsurface.geometry;
+    const w = window.__subsurface.grid.w;
+    const lane = g.laneX[g.sandTop + 2];
+    const x =
+      lane > w / 2
+        ? (g.wall + (lane - g.laneHalf)) / 2
+        : (lane + g.laneHalf + (w - g.wall)) / 2;
+    return x / w;
+  });
+  await digDown(page, sandFrac);
   const ended = await until(page, async () => {
     const b = await text(page, '#banner');
     return b.includes('UNWINNABLE') || b.includes('STUCK');
   });
   assert.ok(ended, `expected a failure, banner was: ${await text(page, '#banner')}`);
-  // Sand holding fluid is the signature of this failure rather than a drain.
   assert.ok(
-    parseInt(await text(page, '#held'), 10) > 0,
-    'the sand band should have taken some of the payload'
+    parseInt(await text(page, '#collected'), 10) < 85,
+    'a shaft through the sand band should not clear the level'
   );
   await ctx.close();
 });

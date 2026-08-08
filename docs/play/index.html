@@ -323,6 +323,103 @@
         border-radius: 3px;
         margin-top: 2px;
       }
+      /* --- the level map --- */
+      /*
+       * A shaft seen in section, which is what the game is: you go down. The
+       * scroller runs vertically, each stop is a level, and the seam down the
+       * middle is the shaft they hang off.
+       */
+      .map {
+        position: relative;
+        height: 168px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        margin: 2px 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background:
+          linear-gradient(180deg, #1a1512 0%, #120f0d 100%);
+        scrollbar-width: thin;
+        overscroll-behavior: contain;
+        touch-action: pan-y;
+      }
+      /* The shaft itself, behind the stops. */
+      .map::before {
+        content: '';
+        position: absolute;
+        left: 34px;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: linear-gradient(180deg, var(--line), #241d18);
+      }
+      .stop {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        width: 100%;
+        border: none;
+        background: none;
+        padding: 7px 12px 7px 10px;
+        text-align: left;
+        font-family: var(--mono);
+        color: var(--dim);
+        cursor: pointer;
+        text-transform: none;
+        letter-spacing: 0;
+        border-radius: 0;
+      }
+      .stop:hover { background: rgba(47, 212, 196, 0.06); color: var(--ink); }
+      /* The bead on the shaft. Filled once cleared, hollow when merely
+         reachable, capped when it is still below where you have got to. */
+      .stop i {
+        flex: none;
+        width: 15px;
+        height: 15px;
+        margin-left: 9px;
+        border-radius: 50%;
+        border: 2px solid var(--faint);
+        background: var(--bg);
+        box-sizing: border-box;
+      }
+      .stop.done i { background: var(--fluid); border-color: var(--fluid); }
+      .stop.here i {
+        border-color: var(--fluid);
+        box-shadow: 0 0 0 3px rgba(47, 212, 196, 0.22);
+      }
+      .stop.locked { cursor: not-allowed; opacity: 0.45; }
+      .stop.locked i { border-style: dashed; border-color: var(--line); }
+      .stop.locked:hover { background: none; color: var(--dim); }
+      .stop b {
+        font-size: 0.74rem;
+        font-weight: 400;
+        color: inherit;
+        min-width: 4.4em;
+      }
+      .stop.here b { color: var(--fluid); }
+      /* The strata swatch: what this level is made of, at a glance. */
+      .stop u {
+        flex: 1;
+        display: flex;
+        height: 13px;
+        border-radius: 2px;
+        overflow: hidden;
+        text-decoration: none;
+        border: 1px solid rgba(0, 0, 0, 0.35);
+      }
+      .stop u s { flex: 1; text-decoration: none; }
+      .stop em {
+        flex: none;
+        font-style: normal;
+        font-size: 0.55rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--faint);
+        min-width: 3.6em;
+        text-align: right;
+      }
+
       /* --- level select --- */
       .picker {
         border: 1px solid var(--line);
@@ -566,9 +663,17 @@
              --------------------------------------------------------- -->
         <div class="picker">
           <div class="pickhead">
-            <span class="k">Level</span>
+            <span class="k">Descent</span>
             <span class="k" id="unlocked">unlocked 1</span>
           </div>
+
+          <!-- The map. Levels are a shaft going down: each stop is a level,
+               the strata bands behind them are the materials that level
+               introduces, and the ones below the last one cleared are still
+               capped off. Drawn as a real element list rather than a canvas
+               so it stays tappable and readable to a screen reader. -->
+          <div class="map" id="map" role="listbox" aria-label="Level"></div>
+
           <div class="pickrow">
             <button id="levelminus" class="step" aria-label="Previous level">−</button>
             <input

@@ -131,8 +131,8 @@
     this.viscosity = 0.3;
     this.pressureGain = 0.045; // how fast head raises that chance
     // How far along a surface a resting cell will look for somewhere to fall.
-    this.flowReach = 6;
-    this.flowReachMax = 16;
+    this.flowReach = 10;
+    this.flowReachMax = 20;
     this.releaseHead = 5; // head needed to squeeze fluid back out of wet sand
     this.releaseChance = 0.35; // per-frame chance a pressured cell lets go
 
@@ -280,9 +280,61 @@
     var reach = this.flowReach + (this.head[this.idx(x, y)] >> 1);
     if (reach > this.flowReachMax) reach = this.flowReachMax;
 
-    var nx = this.scanSide(x, y, d, reach);
-    if (nx === -1) nx = this.scanSide(x, y, -d, reach);
-    if (nx !== -1) this.flow(x, y, nx, y);
+    /*
+     * A drop-off either side beats a slide either side. Taking the first
+     * direction that offered anything meant a droplet three cells from the
+     * edge would happily slide six cells inland instead, because the slide was
+     * found first — which is most of why the last of a pool wandered.
+     */
+    var nx = this.scanSide(x, y, d, reach, true);
+    if (nx === -1) nx = this.scanSide(x, y, -d, reach, true);
+    if (nx === -1) nx = this.scanSide(x, y, d, reach, false);
+    if (nx === -1) nx = this.scanSide(x, y, -d, reach, false);
+    if (nx !== -1) {
+      this.flow(x, y, nx, y);
+      return;
+    }
+
+    /*
+     * Draining from inside the body, not just off its lip.
+     *
+     * The scan above stops at the first cell that is not empty, so a cell
+     * surrounded by other fluid can never move: only the one cell at the pool's
+     * lip is ever eligible. That caps the drain rate at one cell per step no
+     * matter how much fluid is stacked behind it, which is why a pool on a
+     * ledge dribbled away instead of pouring — and why the tail was the worst
+     * part, with a wide film losing one cell at a time from its far end.
+     *
+     * Fluid transmits pressure through itself. So look along the row THROUGH
+     * the body for a column that has somewhere to descend, and go there. The
+     * gap it leaves behind is filled from above on the next step, which is what
+     * a draining pool looks like: the whole surface drops, rather than the far
+     * end being nibbled.
+     */
+    var tx = this.scanThrough(x, y, d, reach);
+    if (tx === -1) tx = this.scanThrough(x, y, -d, reach);
+    if (tx !== -1) {
+      this.flow(x, y, tx, y + 1);
+      return;
+    }
+
+    /*
+     * Spreading a film that has run out of edges to be at.
+     *
+     * The last of a pool is a sheet one cell deep, and a contiguous sheet has
+     * no internal mobility at all: every cell but the two at its ends has
+     * fluid to both sides, so every scan above stops on the first neighbour
+     * and returns nothing. The sheet then creeps toward the drop at one cell
+     * per step from its far end — which is the dribbling tail that made a
+     * cleared level take longer to finish draining than it took to solve.
+     *
+     * So a cell that is walled in by its own fluid looks past the body for
+     * open floor and goes there. The sheet thins and reaches out in both
+     * directions at once instead of being nibbled from one end.
+     */
+    var px = this.scanPast(x, y, d, reach);
+    if (px === -1) px = this.scanPast(x, y, -d, reach);
+    if (px !== -1) this.flow(x, y, px, y);
   };
 
   /*
@@ -301,7 +353,7 @@
    * The scan stops at the first obstruction either way, so fluid never tunnels
    * through a wall to reach open space beyond it.
    */
-  Sim.prototype.scanSide = function (x, y, d, reach) {
+  Sim.prototype.scanSide = function (x, y, d, reach, dropsOnly) {
     var furthest = -1;
     for (var k = 1; k <= reach; k++) {
       var nx = x + d * k;
@@ -312,7 +364,52 @@
       if (below === EMPTY || below === COLLECTOR || below === DRAIN) return nx;
       furthest = nx;
     }
-    return furthest;
+    return dropsOnly ? -1 : furthest;
+  };
+
+  /*
+   * Look along the row through the fluid body itself, and return the column
+   * where it has somewhere to descend — or -1 if there is none within reach.
+   *
+   * Only fluid is passed through. Pressure travels through fluid; it does not
+   * travel through clay, so this must never find a hole on the far side of a
+   * wall. Saturated sand is excluded too: it conducts pressure for the head
+   * calculation, but a cell cannot swim through a sandbank to reach a gap.
+   */
+  Sim.prototype.scanThrough = function (x, y, d, reach) {
+    for (var k = 1; k <= reach; k++) {
+      var nx = x + d * k;
+      if (this.get(nx, y) !== WATER) return -1;
+      var below = this.get(nx, y + 1);
+      if (below === EMPTY || below === COLLECTOR || below === DRAIN) return nx;
+    }
+    return -1;
+  };
+
+  /*
+   * Look past the fluid body for the first open cell on this row, and return
+   * it — or -1 if the body runs further than reach, or ends in a wall.
+   *
+   * Same rule as scanThrough about what may be crossed: fluid only. The scan
+   * refuses to report anything before it has crossed at least one fluid cell,
+   * because the case of an open cell immediately alongside is scanSide's, and
+   * scanSide judges it better — it prefers a drop-off over a slide, which
+   * this cannot see.
+   */
+  Sim.prototype.scanPast = function (x, y, d, reach) {
+    var crossed = false;
+    for (var k = 1; k <= reach; k++) {
+      var nx = x + d * k;
+      var at = this.get(nx, y);
+      if (at === WATER) {
+        crossed = true;
+        continue;
+      }
+      if (!crossed) return -1;
+      if (at === COLLECTOR || at === DRAIN) return nx;
+      return at === EMPTY ? nx : -1;
+    }
+    return -1;
   };
 
   /*
@@ -624,17 +721,17 @@
       // The clay corridor: from generous down to a genuinely tight lane. It
       // starts narrowing immediately, so level 9 is not level 1 with a
       // different speckle.
-      corridor: 0.42 - 0.09 * within(1, 10) - 0.13 * within(11, 20) - 0.07 * late,
+      corridor: 0.42 - 0.08 * within(1, 10) - 0.12 * within(11, 20) - 0.05 * late,
       // Sand deepens through its band and keeps creeping afterwards.
-      sandDepth: 0.14 + 0.06 * within(11, 12) + 0.05 * late,
+      sandDepth: 0.13 + 0.04 * within(11, 12) + 0.03 * late,
       // Fractured slab thickens once it appears.
       fracDepth: 0.08 + 0.05 * within(21, 12) + 0.03 * late,
       // Basin width as a share of the corridor, so it always fits inside it
       // and tightens twice over: a smaller share of a narrower corridor.
-      basin: 0.68 - 0.22 * within(1, 30) - 0.06 * late,
+      basin: 0.7 - 0.18 * within(1, 30) - 0.06 * late,
       // Bedrock apron flanking the basin — the margin for a near miss. Land
       // on it and the fluid still slides home; miss it and the floor is drain.
-      apron: 0.13 - 0.08 * within(1, 30) - 0.03 * late,
+      apron: 0.12 - 0.05 * within(1, 30) - 0.02 * late,
 
       // --- different ------------------------------------------------------
       // How far in from the right wall the corridor may sit. Level 1 is
@@ -644,12 +741,44 @@
       // The strata themselves move, so the cross-section reads as a new place
       // and not as the same diagram with one lane shifted.
       sealAt: 0.27 + 0.05 * pick(2),
-      sandAt: 0.43 + 0.05 * pick(3),
+      sandAt: 0.48 + 0.05 * pick(3),
       fracAt: 0.68 + 0.04 * pick(4),
       cavernAt: 0.79 + 0.05 * pick(5),
       // Which side the bedrock rib blocks, and how far across it reaches.
       ribAt: 0.6 + 0.08 * pick(6),
-      ribReach: 0.22 + 0.16 * pick(7)
+      ribReach: 0.22 + 0.16 * pick(7),
+      /*
+       * Rock tone. A per-level shift applied to every solid material, so one
+       * level is an ochre cutting and the next is a cold grey one. Small
+       * numbers on purpose — this is meant to read as different ground, not
+       * as a different game.
+       */
+      tone: [
+        Math.round((pick(8) - 0.5) * 26),
+        Math.round((pick(9) - 0.5) * 18),
+        Math.round((pick(11) - 0.5) * 22)
+      ],
+
+      /*
+       * Baffles: bedrock shelves reaching in from alternating walls, each
+       * leaving one gap to get through. They are what turns a level from
+       * "find the lane and drop" into a route with corners in it, and they
+       * are the main thing that keeps the late game interesting once the
+       * materials have all been introduced.
+       *
+       * One appears at stage 4, and they accumulate slowly; each reaches
+       * further across as the levels climb, so there are more of them and
+       * less room to get past each one.
+       *
+       * They jut from a wall rather than spanning the level with a hole in
+       * them. A shelf with a hole is a gate, and a gate made of uncuttable
+       * bedrock can be plugged — sand slumps into it and the level is simply
+       * over, which is not difficulty, it is a dead end. A shelf that reaches
+       * part way is an obstacle: there is always a way round, and finding it
+       * is the puzzle.
+       */
+      baffles: n < 4 ? 0 : n < 14 ? 1 : 2,
+      baffleReach: 0.2 + 0.16 * within(4, 40) + 0.04 * late
     };
   }
 
@@ -691,6 +820,42 @@
       if (drift < -1) drift = -1;
       rowShade[y] = Math.sin(y * 0.42 + drift * 2.2) * 3.4 + drift * 2.6;
     }
+
+    /*
+     * Mineral veins.
+     *
+     * The bedding alone gives horizontal structure and nothing else, so a face
+     * reads as ruled paper. Real rock is cut across by seams — quartz,
+     * ironstone, whatever — that run at an angle to the bedding and are the
+     * thing your eye actually latches onto in a cross-section.
+     *
+     * Each vein is a wandering line with a soft falloff either side, drawn
+     * into the tint at build so it costs nothing per frame. They read as part
+     * of the rock rather than as decals because they share its shading.
+     */
+    var veinCount = 3 + Math.floor(R() * 3);
+    var vein = new Float32Array(w * h);
+    for (var v = 0; v < veinCount; v++) {
+      var vx = R() * w;
+      var slope = (R() - 0.5) * 1.6;
+      var wander = 0;
+      var strength = 9 + R() * 11;
+      var width = 0.7 + R() * 1.6;
+      for (y = 0; y < h; y++) {
+        wander += (R() - 0.5) * 0.5;
+        if (wander > 2.5) wander = 2.5;
+        if (wander < -2.5) wander = -2.5;
+        var cx = vx + slope * y + wander * 3;
+        var lo = Math.max(0, Math.floor(cx - width * 2)),
+          hi = Math.min(w - 1, Math.ceil(cx + width * 2));
+        for (x = lo; x <= hi; x++) {
+          var dx = (x - cx) / width;
+          var fall = Math.exp(-dx * dx);
+          vein[y * w + x] += fall * strength;
+        }
+      }
+    }
+
     for (y = 0; y < h; y++) {
       // Not named `band` — that is the level-geometry helper declared below,
       // and shadowing it here silently turns every band(0.3) into a number.
@@ -700,8 +865,8 @@
         // A slow horizontal wobble keeps the bedding from looking ruled.
         var wobble = Math.sin(x * 0.09 + y * 0.03) * 2.2;
         sim.tint[y * w + x] = Math.max(
-          -24,
-          Math.min(24, Math.round(bedding + grain + wobble))
+          -30,
+          Math.min(30, Math.round(bedding + grain + wobble + vein[y * w + x]))
         );
       }
     }
@@ -748,15 +913,146 @@
     // cost half the available variety; the rib now picks its own side.
     var leftmost = wallF + D.corridor / 2 + 0.05;
     var corridorC = rightmost - D.wander * Math.max(0, rightmost - leftmost);
-    var corridorL = col(corridorC - D.corridor / 2),
-      corridorR = col(corridorC + D.corridor / 2);
+    var halfW = Math.max(4, Math.round((D.corridor * w) / 2));
+
+    /*
+     * Baffles: bedrock shelves reaching in from alternating walls.
+     *
+     * They jut from a wall rather than spanning the level with a hole in
+     * them. A shelf with a hole is a gate, and a gate made of uncuttable
+     * bedrock can be plugged — sand slumps into it and the level is simply
+     * over, which is not difficulty, it is a dead end. A shelf that reaches
+     * part way is an obstacle: there is always a way round.
+     */
+    /*
+     * Where a shelf may go: the clay above the sand band, and the clay below
+     * it. Never inside the band.
+     *
+     * That restriction is not tidiness, it is the difference between the late
+     * levels being winnable and not. A shelf inside the band bends the lane
+     * inside it, which gives the sand a sloped inner face — and sand on a
+     * slope slumps into the channel, chokes it, and sends the payload out
+     * sideways to the drains. Measured: every level past 30 collected under
+     * 20% with a bend in the band, and 100% without one.
+     *
+     * The band also stops short of the cavern. Below the last shelf the lane
+     * has to get back over the basin, and a lane that crosses the level in
+     * the last few rows is a diagonal so steep that fluid falls straight out
+     * of it and lands beside the crystal.
+     */
+    var baffleY = [],
+      baffleGapL = [],
+      baffleGapR = [];
+    var baffleThick = Math.max(2, Math.round(0.012 * h));
+    var baffleShelf = [];
+    var bandTop = sandTop,
+      bandBot = sandTop + Math.round(D.sandDepth * h);
+    /*
+     * Shelves live above the sand band, never below it.
+     *
+     * Anything that leaves the band falls down the channel. Into a vertical
+     * shaft that is fine — it piles up on the cavern floor and gets in the
+     * way, which is the point of sand. Into a diagonal it is fatal: the grains
+     * come to rest against the lower wall and seal the traverse completely,
+     * and the payload sits above the plug until the level times out. That is
+     * what every unwinnable late level turned out to be.
+     *
+     * So the lane crosses the level above the sand, then runs straight down
+     * through the band and on to the basin without another corner in it.
+     */
+    var zones = [[sealTop + Math.round(0.02 * h), bandTop - Math.round(0.03 * h)]];
+    if (D.baffles > 0) {
+      var reachW = Math.max(6, Math.round(D.baffleReach * w));
+      var firstLeft = D.pick(50) < 0.5;
+      // One shelf per slice of the zone, so two shelves cannot land on top of
+      // each other and turn the lane into a scribble.
+      var zone = zones[0];
+      var sliceH = (zone[1] - zone[0]) / D.baffles;
+      for (var bI = 0; bI < D.baffles; bI++) {
+        if (sliceH < baffleThick + 5) break; // no room for another
+        var sTop = zone[0] + sliceH * bI;
+        var by = Math.round(sTop + sliceH * (0.25 + 0.4 * D.pick(60 + bI)));
+        var fromLeft = firstLeft === (bI % 2 === 0);
+        var shelfL = fromLeft ? WALL : w - WALL - reachW,
+          shelfR = fromLeft ? WALL + reachW : w - WALL;
+        var openL = fromLeft ? shelfR : WALL,
+          openR = fromLeft ? w - WALL : shelfL;
+        baffleY.push(by);
+        baffleGapL.push(openL);
+        baffleGapR.push(openR);
+        baffleShelf.push([shelfL, shelfR]);
+      }
+    }
+
+    /*
+     * The corridor follows the route, rather than the route having to leave
+     * the corridor to get round a shelf.
+     *
+     * This is the whole reason the two are one thing. A straight lane of clay
+     * with a weaving path through it means the intended route spends most of
+     * its length in the sand band, which swallows the payload — every level
+     * past stage 11 became unwinnable the moment shelves were added. So the
+     * clay lane bends: it is a band of safe ground centred on the path, and
+     * the sand closes in either side of wherever that path has gone.
+     */
+    var lane = [{ y: 0, x: Math.round(corridorC * w) }];
+    var bandLane = null;
+    for (var q = 0; q < baffleY.length; q++) {
+      var wpx = Math.round((baffleGapL[q] + baffleGapR[q]) / 2);
+      bandLane = wpx;
+      /*
+       * A waypoint above and below each shelf at the same x, so the lane
+       * passes it vertically. Steering across the shelf's own rows means the
+       * connecting line crosses bedrock — which cannot be dug, so the channel
+       * is simply interrupted and the payload never leaves the reservoir. A
+       * shelf is something to be beside, not something to pass through.
+       */
+      lane.push({ y: baffleY[q] - 2, x: wpx });
+      lane.push({ y: baffleY[q] + baffleThick + 2, x: wpx });
+    }
+    // Vertical from the top of the sand band to the floor: one x, no corners.
+    if (bandLane === null) bandLane = Math.round(corridorC * w);
+    lane.push({ y: bandTop, x: bandLane });
+    lane.push({ y: h, x: bandLane });
+    lane.sort(function (u, v) {
+      return u.y - v.y;
+    });
+
+    // Piecewise-linear through the waypoints, clamped inside the walls.
+    var laneX = new Int16Array(h);
+    var seg = 0;
+    for (y = 0; y < h; y++) {
+      while (seg < lane.length - 2 && y > lane[seg + 1].y) seg++;
+      var a = lane[seg],
+        bb = lane[seg + 1];
+      var t = bb.y === a.y ? 0 : (y - a.y) / (bb.y - a.y);
+      if (t < 0) t = 0;
+      if (t > 1) t = 1;
+      var cx = Math.round(a.x + (bb.x - a.x) * t);
+      var lo = WALL + halfW,
+        hi = w - WALL - halfW - 1;
+      laneX[y] = cx < lo ? lo : cx > hi ? hi : cx;
+    }
+    var corridorL = laneX[h - 3] - halfW,
+      corridorR = laneX[h - 3] + halfW;
+
+    // The shelves themselves, laid before sand and rock so neither can be
+    // spread over one and breach it; both skip bedrock in turn.
+    for (var bJ = 0; bJ < baffleShelf.length; bJ++)
+      for (y = baffleY[bJ]; y < baffleY[bJ] + baffleThick; y++)
+        for (x = baffleShelf[bJ][0]; x < baffleShelf[bJ][1]; x++)
+          sim.set(x, y, BEDROCK);
 
     var hasSand = opts.sand !== false && D.sand;
     if (hasSand) {
       sandBot = sandTop + Math.round(D.sandDepth * h);
       for (y = sandTop; y < sandBot; y++)
         for (x = WALL; x < w - WALL; x++)
-          if (x < corridorL || x >= corridorR) sim.set(x, y, SAND);
+          if (
+            (x < laneX[y] - halfW || x >= laneX[y] + halfW) &&
+            sim.get(x, y) !== BEDROCK
+          )
+            sim.set(x, y, SAND);
     }
     // Kept for callers that predate the corridor moving; it is the near edge
     // of the sand, which is what they actually wanted.
@@ -770,9 +1066,14 @@
      */
     var ribY = band(D.ribAt),
       ribH = Math.max(2, Math.round(0.03 * h));
-    var ribLeft = corridorC > 0.5; // reach in from whichever side is roomier
-    var ribFrom = ribLeft ? WALL : Math.max(corridorR + 2, w - WALL - col(D.ribReach));
-    var ribTo = ribLeft ? Math.min(col(D.ribReach), corridorL - 2) : w - WALL;
+    var ribLane = laneX[Math.min(h - 1, band(D.ribAt))];
+    var ribLeft = ribLane > w / 2; // reach in from whichever side is roomier
+    var ribFrom = ribLeft
+      ? WALL
+      : Math.max(ribLane + halfW + 2, w - WALL - col(D.ribReach));
+    var ribTo = ribLeft
+      ? Math.min(col(D.ribReach), ribLane - halfW - 2)
+      : w - WALL;
     for (y = ribY; y < ribY + ribH; y++)
       for (x = ribFrom; x < ribTo; x++) sim.set(x, y, BEDROCK);
 
@@ -787,12 +1088,13 @@
       fracBot = fracTop + Math.round(D.fracDepth * h),
       // A margin either side, so the slab cannot be sidestepped by hugging
       // the corridor wall — it spans the route and then some.
-      fracL = Math.max(WALL, corridorL - col(0.05)),
-      fracR = Math.min(w - WALL, corridorR + col(0.05));
+      fracL = Math.max(WALL, laneX[fracTop] - halfW - col(0.05)),
+      fracR = Math.min(w - WALL, laneX[fracTop] + halfW + col(0.05));
     if (opts.fractured !== false && D.fractured) {
       var CH = Math.max(3, Math.round(0.035 * w)); // chunk edge, in cells
       for (y = fracTop; y < fracBot; y++)
         for (x = fracL; x < fracR; x++) {
+          if (sim.get(x, y) === BEDROCK) continue; // never breach a shelf
           sim.set(x, y, FRACTURED);
           var gx = Math.floor((x - fracL) / CH),
             gy = Math.floor((y - fracTop) / CH);
@@ -832,7 +1134,8 @@
       // A pocket sitting in the corridor would put sand on the safe route
       // before the sand band has been taught. Drop it instead of moving it —
       // the pockets are scenery, and the corridor is the promise.
-      if (px + pr >= corridorL && px - pr < corridorR) continue;
+      var laneHere = laneX[Math.max(0, Math.min(h - 1, py))];
+      if (px + pr >= laneHere - halfW && px - pr < laneHere + halfW) continue;
       for (y = py - pr; y <= py + pr; y++)
         for (x = px - pr; x <= px + pr; x++) {
           if (x < WALL || x >= w - WALL || y < 0 || y >= h) continue;
@@ -863,8 +1166,8 @@
      * wide one and forgive a sloppy aim; late levels shave it to a few cells,
      * and a column that lands off the crystal is simply gone.
      */
-    var basinHalf = Math.max(3, Math.round((D.basin * D.corridor * w) / 2));
-    var basinC = Math.round(corridorC * w);
+    var basinHalf = Math.max(4, Math.round((D.basin * D.corridor * w) / 2));
+    var basinC = laneX[Math.min(h - 1, floorY)];
     var basinL = Math.max(WALL + 1, basinC - basinHalf),
       basinR = Math.min(w - WALL - 2, basinC + basinHalf),
       basinBot = Math.min(h - 3, floorY + Math.round(0.05 * h));
@@ -877,7 +1180,7 @@
      * level wide reads as a background, not as a hazard — and the ribs change
      * nothing: fluid landing on one still runs into a drain either way.
      */
-    var apron = Math.max(2, Math.round(D.apron * w));
+    var apron = Math.max(4, Math.round(D.apron * w));
     var mouth = Math.max(4, Math.round(0.12 * w)),
       rib = Math.max(2, Math.round(0.02 * w));
     var drains = [];
@@ -925,6 +1228,23 @@
       centreX: Math.round(w / 2),
       // Down the clay corridor and into the basin, wherever it has drifted to.
       routeX: Math.round((basinL + basinR) / 2),
+      baffleY: baffleY,
+      baffleGapL: baffleGapL,
+      baffleGapR: baffleGapR,
+      /*
+       * The intended path: the x to be at, at each depth that matters. With no
+       * shelves this is a straight drop; with them it is a line that has to
+       * arrive at each gap in turn and still finish over the basin.
+       */
+      laneX: laneX,
+      laneHalf: halfW,
+      route: (function () {
+        var pts = [];
+        for (var q = 1; q < lane.length - 1; q++)
+          pts.push({ y: lane[q].y, x: lane[q].x });
+        pts.push({ y: floorY - 1, x: Math.round((basinL + basinR) / 2) });
+        return pts;
+      })(),
       level: D.level,
       difficulty: D,
       fracTop: fracTop,
@@ -936,10 +1256,36 @@
 
   // The reference solution: one straight channel down the clay corridor,
   // clear of the sand band, landing inside the collector basin.
+  /*
+   * Dig the level's intended route, and report what it freed.
+   *
+   * Follows the waypoints rather than dropping straight: with bedrock shelves
+   * in the way a straight line is no longer a solution, and anything that digs
+   * "the route" — the reference cut in the game, the reference cut in the
+   * tests — has to go through the same one function or they drift apart.
+   */
+  Sim.prototype.digRoute = function (radius) {
+    var g = this.geometry;
+    var r = radius || Math.max(2, Math.round(this.w * 0.03));
+    var total = { removed: 0, grit: 0, freed: 0, shattered: [] };
+    var px = g.route[0].x,
+      py = g.sealTop - 1;
+    for (var q = 0; q < g.route.length; q++) {
+      var one = this.digLine(px, py, g.route[q].x, g.route[q].y, r);
+      total.removed += one.removed;
+      total.grit += one.grit;
+      total.freed += one.freed;
+      for (var k = 0; k < one.shattered.length; k++)
+        if (total.shattered.indexOf(one.shattered[k]) === -1)
+          total.shattered.push(one.shattered[k]);
+      px = g.route[q].x;
+      py = g.route[q].y;
+    }
+    return total;
+  };
+
   function carveIdealChannel(sim, radius) {
-    var g = sim.geometry;
-    var r = radius || Math.max(2, Math.round(sim.w * 0.03));
-    sim.digLine(g.routeX, g.sealTop - 1, g.routeX, g.floorY - 1, r);
+    sim.digRoute(radius);
     return sim;
   }
 

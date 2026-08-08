@@ -104,6 +104,9 @@
 
   var fxBuf = document.createElement('canvas');
   var fxCtx = fxBuf.getContext('2d');
+  // A second half-res buffer, for the rim light carved off the silhouette.
+  var rimBuf = document.createElement('canvas');
+  var rimCtx = rimBuf.getContext('2d');
   var HAS_FILTER = (function () {
     var c = document.createElement('canvas').getContext('2d');
     c.filter = 'blur(1px)';
@@ -289,6 +292,8 @@
   DUST[MAT.WETSAND] = [130, 100, 66];
   DUST[MAT.FRACTURED] = [120, 138, 152];
 
+  var ZERO_TONE = [0, 0, 0];
+
   // Materials that light from above like ground rather than like fluid.
   var SOLID = {};
   SOLID[MAT.CLAY] = SOLID[MAT.SAND] = SOLID[MAT.WETSAND] = 1;
@@ -333,6 +338,8 @@
       cells = sim.cells,
       tint = sim.tint,
       head = sim.head,
+      // Per-level rock tone, so one cutting is ochre and the next is grey.
+      tone = (sim.difficulty && sim.difficulty.tone) || ZERO_TONE,
       w = GRID_W;
 
     // One shimmer value per frame rather than per cell.
@@ -348,25 +355,57 @@
       var openAbove = above === MAT.EMPTY || above === MAT.WATER;
 
       if (m === MAT.WATER) {
-        // Deeper fluid reads darker and richer, so a tall column looks like
-        // it weighs something; the top row catches a bright surface line.
+        /*
+         * Fluid shading. Three things, none of which cost more than the
+         * arithmetic already here, and together they are most of what makes
+         * this read as a liquid rather than as blue cells:
+         *
+         *   depth      a tall column goes darker and swings toward green, the
+         *              way water does — absorption is not uniform across the
+         *              spectrum, so deep water is not just dim, it is a
+         *              different colour
+         *   caustics   a slow diagonal interference pattern drifting through
+         *              the body. Still fluid still moves; without this the
+         *              inside of a pool is a flat wash and the eye reads it
+         *              as a solid
+         *   surface    a graded meniscus over the top two rows rather than a
+         *              single bright line, so the boundary has thickness
+         */
         var h = head[i] > 30 ? 30 : head[i];
-        r -= h * 0.55;
-        g -= h * 0.25;
-        b -= h * 0.2;
+        r -= h * 0.62;
+        g -= h * 0.2;
+        b -= h * 0.34;
+
+        var gx = i % w,
+          gy = (i / w) | 0;
+        var caustic =
+          Math.sin(gx * 0.29 + gy * 0.17 + tick * 0.055) *
+          Math.sin(gx * 0.13 - gy * 0.23 + tick * 0.031);
+        // Strongest near the surface, where light actually reaches.
+        var reach = 1 - (h > 12 ? 12 : h) / 16;
+        r += caustic * 9 * reach;
+        g += caustic * 15 * reach;
+        b += caustic * 13 * reach;
+
         if (above === MAT.EMPTY) {
-          r += 55;
-          g += 40;
-          b += 36;
+          r += 58;
+          g += 44;
+          b += 40;
+        } else if (i >= w && cells[i - 2 * w] === MAT.EMPTY) {
+          // The row under the surface catches half of it, which turns a hard
+          // line into a meniscus with some thickness to it.
+          r += 22;
+          g += 17;
+          b += 15;
         }
       } else if (m === MAT.COLLECTOR) {
         r += shimmer;
         g += shimmer;
         b += shimmer * 0.5;
       } else if (SOLID[m]) {
-        r += tint[i];
-        g += tint[i];
-        b += tint[i];
+        r += tint[i] + tone[0];
+        g += tint[i] + tone[1];
+        b += tint[i] + tone[2];
         /*
          * Lighting the ground. A single top-facing rim light made the bands
          * look like flat stripes with a highlight; what gives a cross-section
@@ -498,6 +537,55 @@
 
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(fxBuf, 0, 0, display.width, display.height);
+
+    drawRim(fw, fh, sx);
+  }
+
+  /*
+   * The rim light along the top of the fluid.
+   *
+   * Take the silhouette, erase a copy of itself shifted down, and what is left
+   * is a band hugging every upward-facing surface — including the curve of a
+   * blob and the lip of a jet, which a per-cell "is the cell above empty" test
+   * cannot see because it only knows about square cells.
+   *
+   * That band, drawn additively in a pale tint, is the specular line you get
+   * where light meets water. It is the single cheapest thing that makes a
+   * silhouette read as a surface rather than as a filled shape: two draws on
+   * a buffer that already exists.
+   */
+  function drawRim(fw, fh, sx) {
+    if (!HAS_FILTER) return;
+    if (rimBuf.width !== fw || rimBuf.height !== fh) {
+      rimBuf.width = fw;
+      rimBuf.height = fh;
+    }
+    var lift = Math.max(1, sx * FX_SCALE * 0.9);
+
+    rimCtx.globalCompositeOperation = 'source-over';
+    rimCtx.clearRect(0, 0, fw, fh);
+    rimCtx.filter = 'blur(' + (sx * FX_SCALE * 1.4).toFixed(2) + 'px) contrast(14)';
+    rimCtx.drawImage(waterBuf, 0, 0, fw, fh);
+    rimCtx.filter = 'none';
+
+    // Erase the same shape sitting slightly lower: what survives is the top.
+    rimCtx.globalCompositeOperation = 'destination-out';
+    rimCtx.filter = 'blur(' + (sx * FX_SCALE * 1.4).toFixed(2) + 'px) contrast(14)';
+    rimCtx.drawImage(waterBuf, 0, lift, fw, fh);
+    rimCtx.filter = 'none';
+
+    // Tint the band rather than using the fluid's own colour, so the highlight
+    // is light and not just more water.
+    rimCtx.globalCompositeOperation = 'source-in';
+    rimCtx.fillStyle = 'rgba(196, 255, 248, 0.85)';
+    rimCtx.fillRect(0, 0, fw, fh);
+    rimCtx.globalCompositeOperation = 'source-over';
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.5;
+    ctx.drawImage(rimBuf, 0, 0, display.width, display.height);
+    ctx.restore();
   }
 
   // Two additive passes at different scales: a tight one for the core and a
@@ -1034,16 +1122,9 @@
     reset(seed + 1);
   });
   document.getElementById('solve').addEventListener('click', function () {
-    var g = sim.geometry;
-    shatter(
-      sim.digLine(
-        g.routeX,
-        g.sealTop - 1,
-        g.routeX,
-        g.floorY - 1,
-        Math.max(2, Math.round(sim.w * 0.03))
-      )
-    );
+    // Through digRoute, not a straight line: bedrock shelves mean the route
+    // has corners in it, and a straight cut just stops at the first shelf.
+    shatter(sim.digRoute(Math.max(2, Math.round(sim.w * 0.03))));
   });
 
   /* ---------------------------------------------------------------------
@@ -1056,6 +1137,7 @@
    * Opening it pauses: the clock already stops while the intro is up, and the
    * overlay swallows drags, so a level cannot quietly run on behind it.
    * ------------------------------------------------------------------- */
+  var mapEl = document.getElementById('map');
   var levelInput = document.getElementById('levelnum');
   var unlockedLabel = document.getElementById('unlocked');
   var experimental = document.getElementById('experimental');
@@ -1074,6 +1156,104 @@
     return Math.min(n, pickCeiling());
   }
 
+  /* ---------------------------------------------------------------------
+   * The map
+   *
+   * A shaft in section, because that is what the game is: you go down. Each
+   * stop is a level, and beside it a swatch of the strata that level is
+   * actually built from — read off the generator rather than hard-coded, so
+   * the map cannot drift out of step with the levels it describes.
+   *
+   * It is a list of buttons, not a canvas. Levels are unbounded, so this has
+   * to scroll and virtualise anyway, and a canvas would give up tapping,
+   * keyboard focus and the screen reader for a picture that is mostly text.
+   * ------------------------------------------------------------------- */
+  var MAP_SWATCH = {
+    clay: '#8c4a32',
+    sand: '#c9a26b',
+    rock: '#5a6b78',
+    bedrock: '#3a3a42'
+  };
+  var mapFrom = 0; // first level currently rendered
+
+  // What a level is made of and what makes it hard, straight from the curve.
+  function strataOf(n) {
+    var D = S.difficultyFor(n);
+    var bands = [MAP_SWATCH.clay];
+    if (D.sand) bands.push(MAP_SWATCH.sand);
+    if (D.fractured) bands.push(MAP_SWATCH.rock);
+    if (D.baffles > 0) bands.push(MAP_SWATCH.bedrock);
+    var note = D.fractured ? 'rock' : D.sand ? 'sand' : 'clay';
+    if (D.baffles > 0) note = D.baffles + ' gate' + (D.baffles > 1 ? 's' : '');
+    return { bands: bands, note: note };
+  }
+
+  /*
+   * Render a window of levels around the selection. Ten at a time: enough to
+   * see where you are and what is coming, few enough that jumping to level
+   * 500 in experimental mode does not build five hundred rows.
+   */
+  function drawMap() {
+    if (!mapEl) return;
+    var n = chosen();
+    var ceiling = pickCeiling();
+    var from = Math.max(1, n - 4);
+    // Never show a window that is all locked ground below the last unlock.
+    if (ceiling !== Infinity) from = Math.min(from, Math.max(1, unlocked - 6));
+    if (from === mapFrom && mapEl.childNodes.length) {
+      // Same window: just move the marks, so scroll position survives.
+      for (var k = 0; k < mapEl.childNodes.length; k++) {
+        var row = mapEl.childNodes[k];
+        var lv = +row.dataset.level;
+        row.className =
+          'stop' +
+          (lv < unlocked ? ' done' : '') +
+          (lv === n ? ' here' : '') +
+          (lv > ceiling ? ' locked' : '');
+        row.setAttribute('aria-selected', String(lv === n));
+      }
+      return;
+    }
+    mapFrom = from;
+
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < 10; i++) {
+      var lv = from + i;
+      var st = strataOf(lv);
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.level = String(lv);
+      b.setAttribute('role', 'option');
+      b.setAttribute('aria-selected', String(lv === n));
+      b.className =
+        'stop' +
+        (lv < unlocked ? ' done' : '') +
+        (lv === n ? ' here' : '') +
+        (lv > ceiling ? ' locked' : '');
+      b.innerHTML =
+        '<i></i><b>' + lv + '</b><u>' +
+        st.bands
+          .map(function (c) {
+            return '<s style="background:' + c + '"></s>';
+          })
+          .join('') +
+        '</u><em>' + st.note + '</em>';
+      frag.appendChild(b);
+    }
+    mapEl.innerHTML = '';
+    mapEl.appendChild(frag);
+  }
+
+  if (mapEl) {
+    // One listener on the container: the rows are rebuilt constantly.
+    mapEl.addEventListener('click', function (ev) {
+      var row = ev.target.closest ? ev.target.closest('.stop') : null;
+      if (!row || row.classList.contains('locked')) return;
+      levelInput.value = row.dataset.level;
+      syncPicker();
+    });
+  }
+
   function syncPicker() {
     var n = chosen();
     if (String(n) !== levelInput.value) levelInput.value = n;
@@ -1087,6 +1267,7 @@
     document.getElementById('levelplus').disabled = n >= pickCeiling();
     solveBtn.hidden = !experimental.checked;
     startBtn.textContent = n === seed ? 'Start digging' : 'Play level ' + n;
+    drawMap();
   }
 
   function nudge(by) {
@@ -1135,17 +1316,30 @@
     var n = chosen();
     if (n !== seed) reset(n);
     hideIntro();
-    var g = sim.geometry;
-    shatter(
-      sim.digLine(
-        g.routeX,
-        g.sealTop - 1,
-        g.routeX,
-        g.floorY - 1,
-        Math.max(2, Math.round(sim.w * 0.03))
-      )
-    );
+    // Through digRoute, not a straight line: bedrock shelves mean the route
+    // has corners in it, and a straight cut just stops at the first shelf.
+    shatter(sim.digRoute(Math.max(2, Math.round(sim.w * 0.03))));
   });
+
+  /*
+   * A read-only handle for the browser tests.
+   *
+   * They drive the game through the canvas, so to aim a drag at a material
+   * they otherwise have to guess a fraction of the width — and every time the
+   * generator moved, those guesses quietly started testing something else. A
+   * test that digs "into the sand" should be able to ask where the sand is.
+   */
+  window.__subsurface = {
+    get geometry() {
+      return sim.geometry;
+    },
+    get level() {
+      return seed;
+    },
+    get grid() {
+      return { w: GRID_W, h: GRID_H };
+    }
+  };
 
   fit();
   reset(1);

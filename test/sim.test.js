@@ -369,8 +369,20 @@ test('the reference channel clears the 85% win threshold', () => {
 test('a shaft cut through the sand band fails', () => {
   const sim = build({ w: 90, h: 150, seed: 7, level: SANDY });
   const g = sim.geometry;
-  // Straight down the middle, through the sand rather than around it.
-  sim.digLine(g.centreX, g.sealTop - 1, g.centreX, g.floorY - 1, 3);
+  /*
+   * Squarely inside the sand, measured from where the lane actually is at the
+   * depth of the band. This used to cut at centreX, which was reliably sand
+   * back when the corridor was pinned to the right wall; the lane now moves
+   * per level and weaves, so a fixed x — or even the lane's position at the
+   * floor — is sometimes the safe route, and the test was quietly asserting
+   * that the intended path fails.
+   */
+  const laneHere = g.laneX[g.sandTop + 2];
+  const inSand =
+    laneHere > sim.w / 2
+      ? Math.round((g.wall + (laneHere - g.laneHalf)) / 2)
+      : Math.round((laneHere + g.laneHalf + (sim.w - g.wall)) / 2);
+  sim.digLine(inSand, g.sealTop - 1, inSand, g.floorY - 1, 3);
 
   const s = run(sim, 4000);
   assert.ok(s.balanced);
@@ -378,10 +390,22 @@ test('a shaft cut through the sand band fails', () => {
     s.collectionPct < 85,
     `cutting through sand should fail, but collected ${s.collectionPct.toFixed(1)}%`
   );
-  // The band slumps into the shaft and the payload never arrives intact.
+  /*
+   * And it fails *because of the sand*, not incidentally. Three ways that
+   * shows up and all of them count: the band drinks the payload, the band
+   * diverts it to a drain, or — the one this assertion used to miss — the
+   * band slumps in and seals the shaft before a single unit gets down it,
+   * which is the most emphatic version of the same lesson.
+   */
+  let refilled = 0;
+  for (let y = g.sandTop; y < g.sandBot; y++)
+    for (let x = inSand - 3; x <= inSand + 3; x++) {
+      const m = sim.get(x, y);
+      if (m === MAT.SAND || m === MAT.WETSAND) refilled++;
+    }
   assert.ok(
-    s.heldBySand > 0 || s.lost > 0,
-    'the sand should have taken some of it, or the drains should have'
+    s.heldBySand > 0 || s.lost > 0 || refilled > 0,
+    'the sand should have taken the payload, diverted it, or buried the shaft'
   );
 });
 
@@ -530,4 +554,69 @@ test('missing the basin is punished harder as levels go up', () => {
     `a 12-cell miss scored ${early.toFixed(1)}% on level 1 and ` +
       `${late.toFixed(1)}% on level 60 — the later level should hurt more`
   );
+});
+
+// ---------------------------------------------------------------------------
+// Pooling — a pool on a ledge has to actually leave it
+// ---------------------------------------------------------------------------
+
+// A slab of floor with one open edge, and a pool sitting on it well back from
+// the drop. This is the shape the complaint was about: fluid that has stopped
+// falling and now has to find its way off a flat surface.
+function ledge({ poolW = 40, depth = 5, poolL = 8, ledgeR = 60 } = {}) {
+  const sim = blank(90, 60);
+  const floorY = 30;
+  for (let x = 1; x <= ledgeR; x++) put(sim, x, floorY, MAT.BEDROCK);
+  for (let y = floorY - depth; y < floorY; y++)
+    for (let x = poolL; x < poolL + poolW; x++) put(sim, x, y, MAT.WATER);
+  return { sim, floorY, total: poolW * depth };
+}
+
+function stillUp({ sim, floorY }) {
+  let n = 0;
+  for (let y = 0; y < floorY; y++)
+    for (let x = 1; x < sim.w - 1; x++) if (sim.get(x, y) === MAT.WATER) n++;
+  return n;
+}
+
+test('a pool finds the edge of its ledge rather than dribbling off it', () => {
+  const L = ledge();
+  let half = null,
+    most = null;
+  for (let i = 0; i < 4000 && most === null; i++) {
+    L.sim.step();
+    const left = stillUp(L);
+    if (half === null && left <= L.total * 0.5) half = i;
+    if (left <= L.total * 0.1) most = i;
+  }
+  /*
+   * Budgets, not exact figures — the claim is about the order of magnitude a
+   * player waits, not a golden number. Before through-fluid pressure and film
+   * spreading these were 329 and 1203 steps, which at four steps a frame is
+   * five seconds of watching a puddle think about it.
+   */
+  assert.ok(half !== null && half < 200, `half the pool took ${half} steps to leave`);
+  assert.ok(most !== null && most < 800, `nine tenths took ${most} steps`);
+});
+
+test('fluid never crosses a wall to find a hole on the other side', () => {
+  // The scans that made the above fast are allowed to pass through fluid, and
+  // through nothing else. A pool walled off from a drop must stay put.
+  const sim = blank(60, 40);
+  const floorY = 25;
+  for (let x = 1; x < 59; x++) put(sim, x, floorY, MAT.BEDROCK);
+  for (let y = floorY - 8; y < floorY; y++) put(sim, 30, y, MAT.BEDROCK); // the wall
+  for (let y = floorY - 4; y < floorY; y++)
+    for (let x = 20; x < 30; x++) put(sim, x, y, MAT.WATER);
+  // A hole in the floor on the far side of the wall.
+  for (let x = 40; x < 46; x++) sim.set(x, floorY, MAT.EMPTY);
+
+  run(sim, 600);
+  for (let y = 0; y < 40; y++)
+    for (let x = 31; x < 60; x++)
+      assert.notStrictEqual(
+        sim.get(x, y),
+        MAT.WATER,
+        `fluid reached x=${x}, y=${y} through a solid wall`
+      );
 });

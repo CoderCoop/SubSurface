@@ -262,7 +262,7 @@ test('cutting the corridor shatters rock into the shaft', () => {
   const g = sim.geometry;
   const bod = new Bodies(sim);
 
-  const r = sim.digLine(g.routeX, g.sealTop - 1, g.routeX, g.floorY - 1, 3);
+  const r = sim.digRoute(3);
   assert.ok(r.shattered.length > 0, 'the corridor route runs through the slab');
   const made = bod.shatterAll(r.shattered);
   assert.ok(made.length > 0);
@@ -280,7 +280,7 @@ test('the corridor route still clears 85% with rock tumbling into the shaft', ()
   const g = sim.geometry;
   const bod = new Bodies(sim);
 
-  const r = sim.digLine(g.routeX, g.sealTop - 1, g.routeX, g.floorY - 1, 3);
+  const r = sim.digRoute(3);
   bod.shatterAll(r.shattered);
   assert.ok(bod.count() > 0, 'the slab is on the route and must break');
 
@@ -304,7 +304,7 @@ test('a level with no fractured rock creates no bodies', () => {
   assert.strictEqual(sim.chunks.length, 0);
   const bod = new Bodies(sim);
   const g = sim.geometry;
-  const r = sim.digLine(g.routeX, g.sealTop - 1, g.routeX, g.floorY - 1, 3);
+  const r = sim.digRoute(3);
   assert.deepStrictEqual(r.shattered, []);
   bod.step(1 / 60);
   assert.strictEqual(bod.count(), 0);
