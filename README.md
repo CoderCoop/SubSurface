@@ -18,7 +18,14 @@ game is, why it exists, and how to use it.
 
 - [Game Design & Technical Specification](docs/design-spec.md) — gameplay mechanics,
   material behaviours, art and audio direction, simulation architecture, level data
-  format, and progression.
+  format, and progression. The source of truth for *intent*.
+- [Architecture](ARCHITECTURE.md) — how the code is put together: the layers and
+  which way they depend, what a level is and where levels come from, how they are
+  judged and generated, and the constraints that are load-bearing rather than
+  incidental. The source of truth for *shape*.
+- [Working notes](CLAUDE.md) — the standing guidance for anyone (or anything)
+  making changes here: workflow, conventions, and the traps that have already
+  cost somebody an afternoon.
 - **Project website** — live at
   [codercoop.github.io/SubSurface](https://codercoop.github.io/SubSurface/),
   source in `docs/index.html`. Plain static HTML and CSS with no build step, so
@@ -60,9 +67,12 @@ has to satisfy.
 open docs/play/index.html   # drag to dig; no install needed
 
 npm install                 # only for the tests
-npm test                    # simulation rules, no browser
+npm test                    # rules, levels, the bank and the judge. ~8 min.
 npm run test:e2e            # the game in a real browser (needs Chromium)
 npm run test:all
+
+node tools/solve.js 7       # profile a level: every plan, tier by tier
+node tools/generate-levels.js 1 24     # search for levels and bank them
 ```
 
 `npm run test:e2e` drives Chromium against a local server. If Playwright has no
@@ -76,7 +86,13 @@ have, set `CHROMIUM_PATH`.
 - `docs/play/vendor/planck.min.js` — the physics engine, committed so the game
   is self-contained. Refresh with `npm run vendor` after bumping the dependency;
   a test fails if the committed copy and the installed one drift apart.
-- `test/` — 35 rule tests, plus 17 end-to-end tests in `test/e2e/` that drive a
+- `docs/play/levels.js` — the level bank: the specs the generator searched for
+  and the solver signed off. Levels with no entry here are built from their
+  number instead, so a missing bank is a smaller game rather than a broken one.
+- `tools/` — the judge (`solve.js`), the generator (`generate-levels.js`) and
+  the verifier that runs inside `npm test`. The judge plays a level rather than
+  reasoning about it; see [ARCHITECTURE.md](ARCHITECTURE.md).
+- `test/` — 65 rule tests, plus 30 end-to-end tests in `test/e2e/` that drive a
   real browser. The rule tests cannot see a dead button or a service worker
   serving a stale script, and both of those have shipped, so the browser tests
   cover the title screen, playing, restarting, the level jump, installability,
