@@ -24,7 +24,7 @@
  */
 
 const S = require('../docs/play/sim.js');
-const { profile, WIN, TWO } = require('./solve.js');
+const { profile, WIN, TWO, CRISP_ACES } = require('./solve.js');
 const { plainSpec } = require('./bank.js');
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -49,11 +49,14 @@ function ranges(n, base) {
      * collector, and no floor shape could make a near miss cost anything. A
      * basin has to be small enough to miss before missing it can mean anything.
      */
-    basin: early ? [0.5, 0.72] : [0.2, 0.46 - 0.1 * Math.min(1, n / 60)],
+    basin: early ? [0.5, 0.72] : [0.1, 0.34 - 0.08 * Math.min(1, n / 60)],
     // The margin for a near miss, and the whole difficulty curve for aim.
-    apron: early ? [0.08, 0.13] : [0.03, 0.09],
-    // The crown. Nothing else turns a miss into a loss.
-    floorSlope: early ? [0, 0.02] : [0.035, 0.085],
+    apron: early ? [0.08, 0.13] : [0.02, 0.09],
+    // The crown is NOT sampled independently — see sample(), where it is
+    // drawn as a ratio against the apron. Probed at L20: independent crowns
+    // landed either too gentle (every miss recovers, eight aces) or too steep
+    // (every miss is total, a lock), and the band between them almost never.
+    floorSlope: early ? [0, 0.02] : null,
     // How far a shelf reaches across.
     baffleReach: [0.18, clamp(base.baffleReach + 0.16, 0.24, 0.5)],
     // Where the route is, and where the strata sit. Pure variety: these move a
@@ -79,8 +82,35 @@ function sample(n, rand) {
   const pick = (k) => R[k][0] + (R[k][1] - R[k][0]) * rand();
   const spec = plainSpec(base);
 
-  for (const k of Object.keys(R)) spec[k] = pick(k);
+  for (const k of Object.keys(R)) if (R[k]) spec[k] = pick(k);
   spec.level = n;
+  /*
+   * The crown, drawn against the apron rather than on its own.
+   *
+   * The 85–92 band — the partial credit the whole criterion turns on — comes
+   * from a coin flip in the fluid rules: a cell landing on the flank looks
+   * both ways for a drop-off and picks a direction at random, so roughly half
+   * of a near miss finds the basin and half runs away. That flip only happens
+   * while the crown's rise and the apron's run are comparable. Much gentler
+   * and everything walks home (every offset aces); much steeper and nothing
+   * does (every miss is total). Sampled independently the two were almost
+   * never comparable, and the probe showed it: ten samples at L20 produced
+   * eight-ace slopes and dead-route locks and nothing between.
+   *
+   * So most samples draw the ratio near unity, where the ladder lives — and a
+   * minority draw the crown deliberately steep, because a steep crown is what
+   * makes the lane fail outright, and a failing lane rescued by a gravel dam
+   * is the most valuable level the search can find.
+   */
+  if (spec.floorSlope === undefined) {
+    const apronCells = spec.apron * 120;
+    if (rand() < 0.3) {
+      spec.floorSlope = 0.06 + 0.05 * rand(); // steep: hunting dam levels
+    } else {
+      const ratio = 0.6 + 1.0 * rand();
+      spec.floorSlope = Math.max(0.015, (ratio * apronCells) / 200);
+    }
+  }
   // The seed moves the rib side, the pockets and the shelf offsets as well as
   // the noise, so two specs with the same dials are still two places.
   spec.seed = 1 + Math.floor(rand() * 100000);
@@ -98,6 +128,15 @@ function sample(n, rand) {
    * corner, two taxes the whole descent.
    */
   spec.vents = base.vents > 0 ? (rand() < 0.6 ? 1 : 2) : 0;
+  /*
+   * How many shelves, sampled around the curve's count rather than taken from
+   * it. The shelves are the route's corners, and the corner count is the most
+   * structural thing about a level — two levels with the same dials and a
+   * different shelf count are different PLACES in a way that two levels with
+   * slightly different aprons are not. The curve keeps the floor (a level in
+   * the shelf bands never loses its shelves); the search may add one.
+   */
+  if (base.baffles > 0) spec.baffles = base.baffles + (rand() < 0.35 ? 1 : 0);
   return spec;
 }
 
@@ -113,11 +152,22 @@ function sample(n, rand) {
 function quality(p) {
   const [failed, one, two, three] = p.bands;
   let q = 0;
-  q -= Math.abs(three - 2) * 2.5; // an ace should be rare, not the default
+  // ONE exact answer is the brief; every extra ace dilutes what finding the
+  // line is worth. The old target of two let the median drift to five.
+  q -= Math.abs(three - 1) * 3;
   q += Math.min(one, 3) * 3; // rough passes are the point
   q += Math.min(two, 2) * 1.5; // and a middle rung is worth something
   q += Math.min(failed, 3) * 1.5; // a miss has to be able to miss
   q -= p.naiveBest / 20; // the further a straight drop is from passing, the better
+  /*
+   * A level whose answer is a MOVE outranks a level whose answer is a lane,
+   * heavily. The bank came out route-shaped thirty-one times out of
+   * thirty-one, and that monotony is most of "boring": the mechanics existed
+   * and were never load-bearing. When the search finds terrain where the lane
+   * alone cannot even reach 2★ and the dam-then-lane aces, that is the most
+   * valuable thing it can find, and the ranking should say so.
+   */
+  if (p.mechanicRequired) q += 8;
   return q;
 }
 
@@ -132,7 +182,15 @@ function quality(p) {
 function accepts(n, p) {
   if (p.error) return false;
   if (n <= 3) return p.winnable && p.ace && p.naiveWins > 0;
-  return p.fun;
+  /*
+   * fun (ace + forgiving + hard) was the first criterion, and the first bank
+   * proved it insufficient: it bounds the bottom of the distribution and not
+   * the top, so levels where every offset aced sailed through and 3★ meant
+   * nothing. crisp bounds the top — at most CRISP_ACES plans ace — and graded
+   * demands a real ladder underneath, so the space between "found the line"
+   * and "missed" has scores in it rather than a cliff.
+   */
+  return p.fun && p.crisp && p.graded;
 }
 
 /*
@@ -146,7 +204,9 @@ function accepts(n, p) {
 function plausible(n, sim, digR) {
   const g = sim.geometry;
   // A crystal narrower than the tool cannot be aimed at, only stumbled into.
-  if (g.basinR - g.basinL < 2 * digR) return 'basin narrower than the dig';
+  // One stroke wide is the floor: that is the smallest deliberate target the
+  // dig radius allows, and it is exactly where precision is worth the most.
+  if (g.basinR - g.basinL < digR) return 'basin narrower than the dig';
   // The roof has to exist and has to be over the crystal, or the level is a
   // straight drop whatever else is true of it.
   if (g.difficulty.tuck > 0 && !g.baffleY.length) return 'no shelf to tuck under';
@@ -199,7 +259,14 @@ function search(n, seed, tries, digR, keep) {
      * that was doing its job and kept only the ones that happened to be
      * forgiving as well. Level 3 spent all fourteen samples finding two.
      */
-    const p = profile(spec, { full: false, minRough: n <= 3 ? 0 : 1 });
+    const p = profile(spec, {
+      full: false,
+      minRough: n <= 3 ? 0 : 1,
+      // Teaching levels are exempt from crisp, so they get no ace budget --
+      // bailing early on aces would skip the naive family that their own
+      // criterion depends on.
+      maxAces: n <= 3 ? undefined : CRISP_ACES
+    });
     if (!accepts(n, p)) continue;
     accepted++;
     const q = quality(p);
@@ -215,6 +282,10 @@ function report(p) {
     plan: p.plan,
     naiveBest: p.naiveBest,
     bands: p.bands,
+    // What the lane alone scores. Under the pass mark, this is a level whose
+    // answer is a move rather than a dig — the kind worth the most.
+    routePct: p.routePct,
+    base: p.base,
     // Every passing plan's cost, so the level can be given a budget that fits
     // all of them and not just the tidiest.
     maxDug: passing.reduce((a, r) => Math.max(a, r.dug), 0)

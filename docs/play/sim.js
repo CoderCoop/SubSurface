@@ -63,6 +63,18 @@
     MEMBRANE: MEMBRANE
   };
 
+  /*
+   * Which materials a step() has to visit. Everything else — bedrock, clay,
+   * the collector, drains, fractured rock waiting to be cut, membranes — sits
+   * inert until some rule reaches INTO it from a live neighbour, so a row
+   * holding none of these can be skipped wholesale. Vents are live even
+   * though they never move, because they roll the dice every frame; skipping
+   * one would change the random stream, and the whole point of the row skip
+   * is that it is bit-identical to the full scan.
+   */
+  var LIVE = new Uint8Array(16);
+  LIVE[SAND] = LIVE[WETSAND] = LIVE[WATER] = LIVE[GRAVEL] = LIVE[VENT] = 1;
+
   var NAMES = {};
   NAMES[EMPTY] = 'empty';
   NAMES[BEDROCK] = 'bedrock';
@@ -130,6 +142,16 @@
      * buoyancy half lives in bodies.js.
      */
     this.mask = new Uint8Array(w * h);
+
+    /*
+     * How many live cells each row holds, maintained by every write. step()
+     * skips rows at zero: most of a level is seal clay, empty cavern and
+     * bedrock, so most rows are dead most of the time — measured on a banked
+     * level mid-drain, the skip visits under half the grid. The count is
+     * bookkeeping, not a cache that can go stale: every path that writes a
+     * cell goes through set/swap or adjusts the count where it writes.
+     */
+    this.rowLive = new Uint16Array(h);
 
     // Fractured rock is pre-scored into chunks: -1 for everything else, else
     // the id of the chunk a cell belongs to. Cutting any part of a chunk
@@ -199,13 +221,20 @@
   };
 
   Sim.prototype.set = function (x, y, m) {
-    this.cells[y * this.w + x] = m;
+    var i = y * this.w + x;
+    this.rowLive[y] += LIVE[m] - LIVE[this.cells[i]];
+    this.cells[i] = m;
   };
 
   Sim.prototype.swap = function (sx, sy, tx, ty) {
     var a = this.idx(sx, sy),
       b = this.idx(tx, ty);
     var m = this.cells[a];
+    if (sy !== ty) {
+      var d = LIVE[this.cells[b]] - LIVE[m];
+      this.rowLive[sy] += d;
+      this.rowLive[ty] -= d;
+    }
     this.cells[a] = this.cells[b];
     this.cells[b] = m;
     var t = this.tint[a];
@@ -225,9 +254,21 @@
   Sim.prototype.computeHead = function () {
     var w = this.w,
       h = this.h;
+    /*
+     * Only the rows that can hold fluid. A column's run count must start at
+     * the top of its contiguous fluid, and above the first live row there is
+     * no fluid anywhere — water and wet sand are both live materials — so
+     * starting the scan there loses nothing. Head values left stale outside
+     * the span are never read: only fluid and wet sand read head, and there
+     * are none out there.
+     */
+    var top = 0;
+    while (top < h && this.rowLive[top] === 0) top++;
+    var bot = h - 1;
+    while (bot >= 0 && this.rowLive[bot] === 0) bot--;
     for (var x = 0; x < w; x++) {
       var run = 0;
-      for (var y = 0; y < h; y++) {
+      for (var y = top; y <= bot; y++) {
         var i = y * w + x;
         var m = this.cells[i];
         if (m === WATER) {
@@ -672,6 +713,12 @@
     // Bottom-up, so a cell that falls is not re-processed the same frame.
     // The horizontal scan direction alternates to cancel out drift bias.
     for (var y = this.h - 1; y >= 0; y--) {
+      // A row with no live material has nothing to update and nothing that
+      // rolls the dice, so skipping it is bit-identical to scanning it. This
+      // is where the level's geography pays off: the seal, the cavern air and
+      // the bedrock floor are dead rows for the whole run, and they are most
+      // of the grid.
+      if (this.rowLive[y] === 0) continue;
       for (var n = 0; n < w; n++) {
         var x = leftFirst ? n : w - 1 - n;
         var i = y * w + x;
@@ -715,10 +762,12 @@
         var m = this.cells[i];
         if (m === CLAY || m === SAND || m === GRAVEL) {
           this.cells[i] = EMPTY;
+          this.rowLive[y] -= LIVE[m]; // sand and gravel leave the row's count
           removed++;
           if (m !== CLAY) grit++;
         } else if (m === WETSAND) {
-          // Hand the held unit back rather than destroying it.
+          // Hand the held unit back rather than destroying it. Live to live,
+          // so the row count stands.
           this.cells[i] = WATER;
           removed++;
           grit++;
@@ -771,7 +820,7 @@
       for (var x = c.x0; x <= c.x1; x++) {
         var i = y * this.w + x;
         if (this.chunkId[i] === id && this.cells[i] === FRACTURED) {
-          this.cells[i] = EMPTY;
+          this.cells[i] = EMPTY; // fractured and empty are both dead rows-wise
           cells.push([x, y]);
         }
       }
@@ -1279,8 +1328,20 @@
      * other, so the basin is chosen first and the last shelf is then built to
      * hang over it.
      */
-    var wantBasinHalf = Math.max(4, Math.round((D.basin * D.corridor * w) / 2));
-    var wantApron = Math.max(4, Math.round(D.apron * w));
+    /*
+     * The floors here are the difference between "hard" and "unhittable", and
+     * they used to be higher than they should be. Clamping basinHalf to 4
+     * meant no crystal could be narrower than nine cells against a dig radius
+     * of four — so ANY route-shaped cut landed its whole column on the
+     * collector, every offset of the route aced, and precision was never worth
+     * anything. The floor is now the dig radius itself: a crystal about one
+     * stroke wide is the smallest thing a player can deliberately hit, and a
+     * level built at that width is exactly as precise as the tool allows. The
+     * apron floor drops with it, since a generous apron under a narrow crystal
+     * gives back everything the crystal asked for.
+     */
+    var wantBasinHalf = Math.max(2, Math.round((D.basin * D.corridor * w) / 2));
+    var wantApron = Math.max(2, Math.round(D.apron * w));
     var laneLo = WALL + halfW,
       laneHi = w - WALL - halfW - 1;
     var bandLane = Math.max(laneLo, Math.min(laneHi, Math.round(corridorC * w)));
@@ -1312,9 +1373,22 @@
       // One shelf per slice of the zone, so two shelves cannot land on top of
       // each other and turn the lane into a scribble.
       var zone = zones[0];
-      var sliceH = (zone[1] - zone[0]) / D.baffles;
-      for (var bI = 0; bI < D.baffles; bI++) {
-        if (sliceH < baffleThick + 5) break; // no room for another
+      /*
+       * As many shelves as the zone can hold, up to the number asked for.
+       *
+       * Slicing by the REQUESTED count and bailing when a slice came out too
+       * thin meant a level asking for two shelves in a shallow zone got zero,
+       * not one — the first slice failed the room check and the break threw
+       * away shelves that would have fit at a coarser slicing. A quarter of
+       * the generator's samples died that way ("no shelf to tuck under"), and
+       * every one of them was a level the builder could have built.
+       */
+      var fitCount = Math.max(
+        0,
+        Math.min(D.baffles, Math.floor((zone[1] - zone[0]) / (baffleThick + 5)))
+      );
+      var sliceH = fitCount > 0 ? (zone[1] - zone[0]) / fitCount : 0;
+      for (var bI = 0; bI < fitCount; bI++) {
         var sTop = zone[0] + sliceH * bI;
         var by = Math.round(sTop + sliceH * (0.25 + 0.4 * D.pick(60 + bI)));
         var fromLeft = firstLeft === (bI % 2 === 0);
@@ -1330,7 +1404,7 @@
          * Only if there is room left to get past: a shelf that spans the
          * level is a seal, not an obstacle.
          */
-        var lastOne = bI === D.baffles - 1 || sliceH * (bI + 2) > zone[1] - zone[0] + 1;
+        var lastOne = bI === fitCount - 1;
         if (D.tuck > 0 && lastOne) {
           var needLeft = bandLane + wantBasinHalf + wantApron + 3 - WALL;
           var needRight = w - WALL - (bandLane - wantBasinHalf - wantApron - 3);

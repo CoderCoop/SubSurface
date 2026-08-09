@@ -44,6 +44,15 @@ const TWO = 92; // 2★
 const THREE = 97; // 3★ — you found THE line
 
 /*
+ * How many plans may ace before the line stops being special. One is the
+ * exact answer; the second is grace for an offset so small the dig radius
+ * makes it the same cut. Three aces means any of a hand-width of positions
+ * gets the top grade, which is the "levels are too easy" complaint in one
+ * number — the first bank passed the old criterion with a MEDIAN of five.
+ */
+const CRISP_ACES = 2;
+
+/*
  * Verification runs at the play resolution on purpose. Levels are authored in
  * fractions so they build at any size, but the simulation does not behave
  * identically across them — a channel four cells wide is a different channel
@@ -259,12 +268,20 @@ function routeStrokes(sim, shift, aim) {
  * So the four steps go: comfortably inside, on the lip, out on the apron, and
  * past it. That is the run from "found the line" to "missed", and where a level
  * puts the tiers along it is exactly what the criterion is asking about.
+ *
+ * `pre` is an optional list of phases to cut before every rough attempt — the
+ * collapse undercut, on a level whose answer is the dam rather than the lane.
+ * The rough family has to be built on the plan that actually aces, because
+ * "does a near miss still get home" is a question about the answer, and asking
+ * it of a route that never worked measures nothing.
  */
-function roughPlans(sim) {
+function roughPlans(sim, pre) {
   const g = sim.geometry;
   const basin = Math.max(3, Math.round((g.basinR - g.basinL) / 2));
   const apron = Math.max(2, g.apron);
   const out = [];
+  const tag = pre ? 'c+' : '';
+  const wrap = (strokes) => (pre || []).concat([{ strokes }]);
   /*
    * Ordered by where the score is likeliest to land rather than by how big the
    * error is, because the search stops as soon as it has seen a rough pass. Out
@@ -272,18 +289,36 @@ function roughPlans(sim) {
    * centre almost always aces and past the apron almost always fails, so
    * asking those first costs a simulation to learn nothing.
    */
+  /*
+   * The offsets are chosen around how delivery actually works, which is by
+   * OVERLAP: the pool at the bottom of a shaft drains wholesale through any
+   * gap it can reach, so a cut whose mouth overlaps the basin at all tends to
+   * deliver everything, and one that misses entirely delivers whatever the
+   * crown's coin flip returns. The informative offsets are therefore at the
+   * edges of overlap, not spread evenly across the level:
+   *
+   *   lip     about half the cut over the basin — the coin-flip zone
+   *   graze   a sliver of overlap: one or two columns' worth
+   *   flank   no overlap, landing on the crown's slope
+   *   past    beyond the apron entirely
+   *
+   * There is deliberately no dead-centre step any more. An offset smaller
+   * than the dig radius is the same cut as the route — it aced in lockstep
+   * with it on every probed level, consumed the crisp budget twice over, and
+   * measured nothing the route had not already measured.
+   */
   const steps = [
-    ['apron', basin + Math.round(apron / 2)],
     ['lip', basin],
-    ['past', basin + apron + 2],
-    ['in', Math.max(2, Math.round(basin / 2))]
+    ['graze', basin + DIG_R - 1],
+    ['flank', basin + DIG_R + Math.max(1, Math.ceil(apron / 2))],
+    ['past', basin + DIG_R + apron + 2]
   ];
   for (const [label, mag] of steps)
     for (const sign of [-1, 1])
       out.push({
-        name: 'aim' + label + (sign > 0 ? '+' : '-') + mag,
+        name: tag + 'aim' + label + (sign > 0 ? '+' : '-') + mag,
         kind: 'rough',
-        cuts: [{ strokes: routeStrokes(sim, 0, sign * mag) }]
+        cuts: wrap(routeStrokes(sim, 0, sign * mag))
       });
   /*
    * And the same error made higher up: the player who took the whole line
@@ -292,9 +327,9 @@ function roughPlans(sim) {
   for (const sign of [-1, 1]) {
     const d = sign * (basin + Math.round(apron / 2));
     out.push({
-      name: 'shift' + (d > 0 ? '+' : '') + d,
+      name: tag + 'shift' + (d > 0 ? '+' : '') + d,
       kind: 'rough',
-      cuts: [{ strokes: routeStrokes(sim, d, 0) }]
+      cuts: wrap(routeStrokes(sim, d, 0))
     });
   }
   return out;
@@ -310,16 +345,23 @@ function roughPlans(sim) {
  * settle is long enough for the pile to come to rest before anything is
  * routed past it.
  */
-function collapsePlans(sim) {
+// The undercut strokes that drop each gravel pocket, shared between the
+// collapse plans and the rough family built on a collapse answer.
+function collapseUndercuts(sim) {
   const g = sim.geometry;
   if (!g.gravelAt || !g.gravelAt.length) return [];
-  const out = [];
-  const undercuts = g.gravelAt.map((p) => ({
+  return g.gravelAt.map((p) => ({
     x0: p[0] - p[2] - 2,
     y0: p[1] + p[2] + 2,
     x1: p[0] + p[2] + 2,
     y1: p[1] + p[2] + 2
   }));
+}
+
+function collapsePlans(sim) {
+  const undercuts = collapseUndercuts(sim);
+  if (!undercuts.length) return [];
+  const out = [];
 
   for (let i = 0; i < undercuts.length; i++) {
     out.push({
@@ -462,10 +504,21 @@ function bandOf(pct) {
 function profile(spec, opts = {}) {
   const full = !!opts.full;
   const minRough = opts.minRough === undefined ? 1 : opts.minRough;
+  /*
+   * The ace budget, for callers that will reject on crisp anyway. Too many
+   * aces is the most common rejection after a dead route, and without this it
+   * was also the most expensive: crisp was only computed at the end, so a
+   * five-ace slope still paid for the whole naive family — the costliest
+   * plans in the set — before being thrown away. Callers that want the full
+   * distribution (the report, the CLI, the teaching levels whose criterion
+   * does not include crisp) leave it unset.
+   */
+  const maxAces = opts.maxAces === undefined ? Infinity : opts.maxAces;
   const probe = build(spec);
   const rows = [];
   const settings = { stopAt: THREE, giveUpBelow: WIN };
 
+  let aces = 0;
   let broke = null;
   const run = (p) => {
     const r = play(spec, p, settings);
@@ -483,24 +536,72 @@ function profile(spec, opts = {}) {
       exact: !r.bailed
     };
     rows.push(row);
+    if (row.kind !== 'naive' && row.band === 3) aces++;
     return row;
   };
+  const acesBlown = () => !full && aces > maxAces;
 
   // 1. Is there an answer at all?
   const route = run(routePlan(probe));
   if (broke) return { error: 'conservation broke on ' + broke, rows };
-  if (!full && route.pct < THREE) return verdict(rows, minRough, 'no ace: route ' + route.pct.toFixed(1));
 
-  // 2. Does a near miss still get home? The rare question, and the cheap one.
+  /*
+   * 2. If the lane is not the answer, is the DAM the answer?
+   *
+   * This used to reject outright the moment the route failed to ace, and that
+   * rejection was quietly deciding what kind of game this is. A level whose
+   * best line is "collapse the pocket, then route" has a failing route by
+   * definition — the dam is what makes the route worth cutting — so the
+   * short-circuit made mechanic-required levels unfindable, and every level
+   * the generator could possibly bank was a variation on "dig the lane". The
+   * constructive move stayed decoration because the judge refused to look at
+   * levels where it was load-bearing.
+   *
+   * So a failed route is now a fork, not a verdict: try the collapses, and if
+   * one of them aces, the level's answer is the dam and the rest of the
+   * profile measures THAT answer. Only when nothing aces is the spec dead.
+   *
+   * The route has to be badly beaten, not merely edged out. A route at 96.9%
+   * with a collapse at 97.1% is a lane level with a redundant flourish, and
+   * banking it as "the dam is the answer" would teach the player a move the
+   * level does not actually need. TWO is the line: the lane alone must not
+   * even reach 2★ for the dam to count as required.
+   */
+  let pre = null;
+  let baseName = 'route';
+  if (route.band < 3) {
+    /*
+     * Bounded at two attempts: the single-pocket collapses. Each collapse
+     * simulation is the most expensive plan in the set (a 1400-step settle
+     * before anything is cut), a failed route is the single most common
+     * rejection, and the all-pockets variant almost never aces where neither
+     * single pocket does — so an unbounded rescue would spend most of the
+     * search's whole budget confirming rejections.
+     */
+    for (const p of collapsePlans(probe).slice(0, 2)) {
+      const r = run(p);
+      if (broke) return { error: 'conservation broke on ' + broke, rows };
+      if (r.band === 3 && route.pct < TWO && !pre) {
+        pre = p.cuts.slice(0, -1); // the undercut phases, without the route cut
+        baseName = p.name;
+      }
+    }
+    if (!full && !pre) return verdict(rows, minRough, 'no ace: route ' + route.pct.toFixed(1));
+  }
+
+  // 3. Does a near miss still get home? Asked of the answer that aces — the
+  // lane, or the dam-then-lane — because forgiveness of a plan that never
+  // worked measures nothing.
   let roughs = 0;
-  for (const p of roughPlans(probe)) {
+  for (const p of roughPlans(probe, pre)) {
     const r = run(p);
     if (broke) return { error: 'conservation broke on ' + broke, rows };
     if (r.band === 1) roughs++;
+    if (acesBlown()) return verdict(rows, minRough, aces + ' aces already');
   }
   if (!full && roughs < minRough) return verdict(rows, minRough, 'nothing passes roughly');
 
-  // 3. Is it obvious?
+  // 4. Is it obvious?
   for (const p of naivePlans(probe)) {
     const r = run(p);
     if (broke) return { error: 'conservation broke on ' + broke, rows };
@@ -508,20 +609,22 @@ function profile(spec, opts = {}) {
   }
 
   /*
-   * 4. And the constructive move. Last because it is the most expensive plan in
-   * the set — it settles a gravel pile before it cuts anything — and because a
-   * collapse can only ADD a passing score, so it could never rescue a spec the
-   * clauses above have already rejected. Only a spec that has survived them all
-   * pays for it.
+   * 5. Any collapse plans not already run in step 2 — on a lane level they are
+   * still worth recording, because a dam that ALSO works is part of the
+   * level's true distribution. Most expensive family, so it goes last and only
+   * a spec that survived everything else pays for it.
    */
+  const seen = new Set(rows.map((r) => r.name));
   for (const p of collapsePlans(probe)) {
+    if (seen.has(p.name)) continue;
     run(p);
     if (broke) return { error: 'conservation broke on ' + broke, rows };
+    if (acesBlown()) return verdict(rows, minRough, aces + ' aces already');
   }
-  return verdict(rows, minRough);
+  return verdict(rows, minRough, undefined, baseName);
 }
 
-function verdict(rows, minRough, bailedBecause) {
+function verdict(rows, minRough, bailedBecause, baseName) {
   const naive = rows.filter((r) => r.kind === 'naive');
   const solved = rows.filter((r) => r.kind !== 'naive');
   const top = (rs) => rs.reduce((a, b) => (b.pct > a.pct ? b : a), { pct: 0, name: null, dug: 0 });
@@ -531,6 +634,10 @@ function verdict(rows, minRough, bailedBecause) {
   const naiveWins = naive.filter((r) => r.band > 0).length;
   const rough = solved.filter((r) => r.band === 1).length;
   const aces = solved.filter((r) => r.band === 3).length;
+  // By kind rather than by name: routePlan is the only plan of kind 'route',
+  // and callers that synthesise rows (the tests) name them freely.
+  const routeRow = rows.find((r) => r.kind === 'route');
+  const routePct = routeRow ? routeRow.pct : 0;
 
   // A histogram over the tiers, which is the whole point of the exercise: the
   // shape of it says more than any single number pulled out of it.
@@ -542,8 +649,30 @@ function verdict(rows, minRough, bailedBecause) {
   const ace = aces >= 1;
   const forgiving = rough >= minRough;
   const hard = naiveWins === 0;
+  /*
+   * The clauses the first criterion missed, and the reason a bank could pass
+   * it and still play easy. The owner's words were "ONE exact answer scoring
+   * ~100%, a few rougher answers passing in the 85–92 band" — and `ace` only
+   * ever checked that an exact answer exists. A level where every offset of
+   * the route aces too satisfies that clause perfectly and is a slope with a
+   * scoreboard: the measured bank had a median of five aces per level, so 3★
+   * meant "you found the area", not "you found the line".
+   *
+   *   crisp   finding the line is worth something because ALMOST NOTHING
+   *           else aces — at most CRISP_ACES plans reach 3★
+   *   graded  there is a real ladder under the top rung: at least two plans
+   *           land in the passing-but-not-acing range, so the space between
+   *           "found the line" and "missed" has scores in it
+   */
+  const crisp = ace && aces <= CRISP_ACES;
+  const graded = bands[1] + bands[2] >= 2;
+  // The level whose answer is a move, not a lane: the route alone cannot even
+  // reach 2★, and something aces anyway.
+  const mechanicRequired = ace && routePct < TWO;
   const reasons = [];
   if (!ace) reasons.push('no plan reaches ' + THREE + '%');
+  if (ace && !crisp) reasons.push(aces + ' plans ace — the line is not special');
+  if (!graded) reasons.push('no ladder: ' + (bands[1] + bands[2]) + ' plans between ' + WIN + ' and ' + THREE);
   if (!forgiving) reasons.push('nothing passes roughly (' + rough + ' in ' + WIN + '–' + TWO + ')');
   if (!hard) reasons.push(naiveWins + ' naive drop(s) clear it');
   if (bailedBecause) reasons.push('short-circuited: ' + bailedBecause);
@@ -569,6 +698,13 @@ function verdict(rows, minRough, bailedBecause) {
     bands,
     naiveBands,
     margin: best.pct - naiveBest.pct,
+    crisp,
+    graded,
+    routePct,
+    mechanicRequired,
+    // Which answer the rough family was built on: 'route', or the collapse
+    // plan that aced when the route could not.
+    base: baseName || 'route',
     // A spec rejected early has not run every plan, so its distribution is
     // partial. Say so rather than letting a caller read a zero as a measurement.
     partial: !!bailedBecause,
@@ -584,6 +720,7 @@ function summarise(p) {
   const b = p.bands;
   return (
     (p.fun ? 'FUN ' : p.interesting ? 'ok  ' : p.winnable ? 'dull' : 'BAD ') +
+    (p.mechanicRequired ? ' DAM-REQUIRED' : '') +
     '  best ' + p.best.toFixed(1).padStart(5) + '% (' + (p.plan || '—') + ')' +
     '  naive ' + p.naiveBest.toFixed(1).padStart(5) + '%' +
     '  tiers ' + b[3] + '★★★/' + b[2] + '★★/' + b[1] + '★/' + b[0] + '✗' +
@@ -604,12 +741,14 @@ module.exports = {
   roughPlans,
   collapsePlans,
   routeStrokes,
+  collapseUndercuts,
   bandOf,
   GRID_W,
   GRID_H,
   WIN,
   TWO,
-  THREE
+  THREE,
+  CRISP_ACES
 };
 
 /*

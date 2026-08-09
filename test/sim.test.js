@@ -993,3 +993,47 @@ test('a seam keeps a diagonal open through the sand band, which nothing else doe
     `a lined diagonal should deliver; it managed ${lined.toFixed(1)}% against ${bare.toFixed(1)}%`
   );
 });
+
+// ---------------------------------------------------------------------------
+// The dead-row skip — a speedup that must stay invisible
+// ---------------------------------------------------------------------------
+
+test('row-live counts stay exact through digging, collapse and flow', () => {
+  /*
+   * step() skips rows whose live-material count is zero, so a count that
+   * drifts is not a performance bug, it is a correctness bug: an undercounted
+   * row freezes mid-air (sand hangs, fluid stops), an overcounted one only
+   * wastes time. The invariant is checked against a full recount after every
+   * kind of mutation the game has.
+   */
+  const live = (sim, y) => {
+    let n = 0;
+    for (let x = 0; x < sim.w; x++) {
+      const m = sim.raw(x, y);
+      if (
+        m === MAT.SAND || m === MAT.WETSAND || m === MAT.WATER ||
+        m === MAT.GRAVEL || m === MAT.VENT
+      ) n++;
+    }
+    return n;
+  };
+  const check = (sim, when) => {
+    for (let y = 0; y < sim.h; y++)
+      assert.strictEqual(sim.rowLive[y], live(sim, y), `row ${y} miscounted ${when}`);
+  };
+
+  const sim = build({ w: 120, h: 200, seed: 12, level: 12 });
+  check(sim, 'after build');
+  sim.digRoute(4);
+  check(sim, 'after the route dig');
+  for (let i = 0; i < 400; i++) sim.step();
+  check(sim, 'after 400 steps of flow');
+  const g = sim.geometry;
+  if (g.gravelAt.length) {
+    const p = g.gravelAt[0];
+    sim.digLine(p[0] - p[2] - 2, p[1] + p[2] + 2, p[0] + p[2] + 2, p[1] + p[2] + 2, 4);
+    for (let i = 0; i < 400; i++) sim.step();
+    check(sim, 'after the collapse settled');
+  }
+  assert.ok(sim.stats().balanced);
+});

@@ -110,13 +110,19 @@ function format(bank) {
           '      report: { best: ' + round(r.best, 2) +
             ', plan: ' + JSON.stringify(r.plan) +
             ', naiveBest: ' + round(r.naiveBest, 2) +
+            (r.routePct === undefined ? '' : ', routePct: ' + round(r.routePct, 2)) +
+            (r.base === undefined ? '' : ', base: ' + JSON.stringify(r.base)) +
             ', bands: ' + JSON.stringify(r.bands) +
             ', maxDug: ' + r.maxDug + ' }'
         );
       }
+      const damRequired = r && r.routePct !== undefined && r.routePct < 85;
       const note = r
         ? `    // ${r.best.toFixed(1)}% by ${r.plan}; best naive drop ${r.naiveBest.toFixed(1)}%; ` +
-          `plans by tier ${r.bands[3]}★★★/${r.bands[2]}★★/${r.bands[1]}★/${r.bands[0]}✗\n`
+          `plans by tier ${r.bands[3]}★★★/${r.bands[2]}★★/${r.bands[1]}★/${r.bands[0]}✗\n` +
+          (damRequired
+            ? `    // the lane alone manages ${r.routePct.toFixed(1)}% — the dam is the answer\n`
+            : '')
         : '';
       return note + '    ' + n + ': {\n' + lines.join(',\n') + '\n    }';
     })
