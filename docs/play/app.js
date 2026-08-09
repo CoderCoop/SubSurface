@@ -339,7 +339,7 @@
   // Materials that light from above like ground rather than like fluid.
   var SOLID = {};
   SOLID[MAT.CLAY] = SOLID[MAT.SAND] = SOLID[MAT.WETSAND] = 1;
-  SOLID[MAT.BEDROCK] = SOLID[MAT.FRACTURED] = 1;
+  SOLID[MAT.BEDROCK] = SOLID[MAT.FRACTURED] = SOLID[MAT.VENT] = 1;
 
   function reset(newSeed) {
     seed = newSeed === undefined ? seed : newSeed;
@@ -1300,6 +1300,9 @@
   // What each chamber is worth saying in the two characters it has room for.
   function nodeNote(n) {
     var D = dialsFor(n);
+    // Hot first: a vent is the only thing down there that charges you for
+    // taking your time, so it is the thing worth knowing before you go in.
+    if (D.vents > 0) return (D.baffles || '') + 'h';
     if (D.baffles > 0) return D.baffles + (D.fractured ? 'r' : D.sand ? 's' : 'c');
     return D.fractured ? 'rock' : D.sand ? 'sand' : 'clay';
   }

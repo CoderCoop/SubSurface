@@ -53,7 +53,7 @@ const DIALS = [
   'ribAt', 'ribReach', 'tone',
   'baffles', 'baffleReach',
   'floorSlope', 'tuck',
-  'digBudget', 'seconds', 'gravel', 'pillar'
+  'digBudget', 'seconds', 'gravel', 'vents', 'pillar'
 ];
 
 // A plain, fully-specified spec — no `pick`, so the builder rebuilds it from
