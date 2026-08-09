@@ -265,11 +265,18 @@ function roughPlans(sim) {
   const basin = Math.max(3, Math.round((g.basinR - g.basinL) / 2));
   const apron = Math.max(2, g.apron);
   const out = [];
+  /*
+   * Ordered by where the score is likeliest to land rather than by how big the
+   * error is, because the search stops as soon as it has seen a rough pass. Out
+   * on the apron is where a level puts its 1★ if it puts one anywhere; dead
+   * centre almost always aces and past the apron almost always fails, so
+   * asking those first costs a simulation to learn nothing.
+   */
   const steps = [
-    ['in', Math.max(2, Math.round(basin / 2))],
-    ['lip', basin],
     ['apron', basin + Math.round(apron / 2)],
-    ['past', basin + apron + 2]
+    ['lip', basin],
+    ['past', basin + apron + 2],
+    ['in', Math.max(2, Math.round(basin / 2))]
   ];
   for (const [label, mag] of steps)
     for (const sign of [-1, 1])
@@ -418,12 +425,39 @@ function bandOf(pct) {
  *
  * All three, or it is not a level worth banking.
  *
- * Ordering is chosen so the common rejections are cheap, because the generator
- * runs this on thousands of specs and almost all of them are bad. The route
- * goes first (one simulation kills anything with no answer at all), then the
- * naive drops nearest the crystal (one or two more kill anything boring), and
- * only a spec that has survived both pays for the rough family. `opts.full`
- * turns the short-circuiting off, which is what the report and the tests want.
+ * Ordering exists so the common rejections are cheap — the generator runs this
+ * on thousands of specs and almost all of them are bad. Two things decide it,
+ * and they are not the same thing:
+ *
+ *   which question is rarest    reject on that first, so most specs never
+ *                               reach the later stages at all
+ *   what each question costs    in simulated steps, which varies more than
+ *                               tenfold between plan families
+ *
+ * The rough family answers the rare question AND is the cheap one, so it goes
+ * first after the route. Its plans get down to the cavern and settle in a
+ * thousand steps or so; the naive drops are the expensive ones, because a shaft
+ * that meets the roof leaves the payload working its way along a shelf looking
+ * for the open end, which takes several thousand steps to resolve into a
+ * verdict of nought per cent. Measured on one level-4 candidate: the whole
+ * rough family, six seconds; the naive family, fifty.
+ *
+ * This has moved once already. Naive drops used to go first, on the reasoning
+ * that a boring level is the common case and dies after one or two simulations.
+ * That stopped being true the moment the roof over the crystal was actually
+ * built — a straight drop essentially never clears a level now, so those ten
+ * expensive simulations ran in full and told us nothing.
+ *
+ * Note what is NOT short-circuited: the rough family always runs to the end,
+ * even once it has seen enough to accept. Truncating it saved three seconds and
+ * left the histogram partial, which meant every accepted spec had to be
+ * profiled a second time from scratch to be ranked or recorded — fifty seconds
+ * to save three. A spec that survives every stage here leaves with a complete
+ * distribution and needs no second pass.
+ *
+ * `opts.full` runs everything even after a rejection, which is what the report
+ * and the CLI want: when a level is wrong you want the whole table, not the
+ * first thing that was wrong with it.
  */
 function profile(spec, opts = {}) {
   const full = !!opts.full;
@@ -457,15 +491,30 @@ function profile(spec, opts = {}) {
   if (broke) return { error: 'conservation broke on ' + broke, rows };
   if (!full && route.pct < THREE) return verdict(rows, minRough, 'no ace: route ' + route.pct.toFixed(1));
 
-  // 2. Is it obvious?
+  // 2. Does a near miss still get home? The rare question, and the cheap one.
+  let roughs = 0;
+  for (const p of roughPlans(probe)) {
+    const r = run(p);
+    if (broke) return { error: 'conservation broke on ' + broke, rows };
+    if (r.band === 1) roughs++;
+  }
+  if (!full && roughs < minRough) return verdict(rows, minRough, 'nothing passes roughly');
+
+  // 3. Is it obvious?
   for (const p of naivePlans(probe)) {
     const r = run(p);
     if (broke) return { error: 'conservation broke on ' + broke, rows };
     if (!full && r.band > 0) return verdict(rows, minRough, 'naive ' + p.name + ' clears it');
   }
 
-  // 3. Does a near miss still get home?
-  for (const p of [...roughPlans(probe), ...collapsePlans(probe)]) {
+  /*
+   * 4. And the constructive move. Last because it is the most expensive plan in
+   * the set — it settles a gravel pile before it cuts anything — and because a
+   * collapse can only ADD a passing score, so it could never rescue a spec the
+   * clauses above have already rejected. Only a spec that has survived them all
+   * pays for it.
+   */
+  for (const p of collapsePlans(probe)) {
     run(p);
     if (broke) return { error: 'conservation broke on ' + broke, rows };
   }
@@ -569,10 +618,12 @@ module.exports = {
  * which way it is wrong, which the pass/fail from the test suite cannot.
  */
 if (require.main === module) {
-  const S2 = require('../docs/play/sim.js');
+  // Through the bank, so the CLI profiles the level the game would build and
+  // not the one the difficulty curve would have built instead.
+  const { specFor } = require('./bank.js');
   const args = process.argv.slice(2).map(Number).filter((n) => Number.isFinite(n));
   for (const n of args.length ? args : [1]) {
-    const spec = Object.assign(S2.difficultyFor(n), { level: n, seed: n });
+    const spec = specFor(n);
     const p = profile(spec, { full: true });
     process.stdout.write('\nlevel ' + n + '  ' + summarise(p) + '\n');
     if (p.rows)

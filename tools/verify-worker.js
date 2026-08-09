@@ -13,14 +13,26 @@
  * coordination beyond handing out the numbers.
  */
 
-const S = require('../docs/play/sim.js');
 const { profile, build, routePlan, play, WIN, THREE } = require('./solve.js');
+const { specFor, load } = require('./bank.js');
+
+/*
+ * A banked level is held to the full criterion; a derived one is only reported
+ * on. That asymmetry is the point of the bank: the generator searched until it
+ * found terrain that met the criterion and wrote down what it measured, so a
+ * banked level failing it now means something has drifted — the rules changed
+ * under the bank, or the bank was edited by hand. A derived level has never
+ * claimed to meet it, and gating on one would be gating on the difficulty curve
+ * being lucky.
+ */
+const BANK = load();
 
 process.on('message', (msg) => {
   const out = [];
-  const bank = msg.bank || null;
   for (const n of msg.levels) {
-    const spec = bank && bank[n] ? bank[n] : Object.assign(S.difficultyFor(n), { level: n, seed: n });
+    // Banked where the bank has an entry, derived where it does not — one
+    // answer to "what is level 7", whichever side of the bank it comes from.
+    const spec = specFor(n);
     /*
      * The cheap question, asked of every level: does the level's own route get
      * home? Run to the top tier rather than to the pass mark, so the number in
@@ -30,8 +42,10 @@ process.on('message', (msg) => {
      */
     const r = play(spec, routePlan(build(spec)), { stopAt: THREE, giveUpBelow: WIN });
 
+    const banked = !!(BANK && BANK.levels[n]);
     const row = {
       level: n,
+      banked,
       route: r.pct,
       balanced: r.balanced,
       ok: r.pct >= WIN && r.balanced
@@ -52,6 +66,9 @@ process.on('message', (msg) => {
         row.plan = v.plan;
         row.bands = v.bands;
         row.reasons = v.reasons;
+        // Levels 1-3 teach the basic move and are meant to fall to a straight
+        // drop, so the criterion they were banked against is a different one.
+        if (banked && n >= 4 && !v.fun) row.ok = false;
       }
     }
     out.push(row);

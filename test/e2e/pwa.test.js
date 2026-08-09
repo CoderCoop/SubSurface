@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { serve, launch, watch, digDown, text, until, PHONE } = require('./helpers');
+const { serve, launch, watch, digDown, aimAt, text, until, PHONE } = require('./helpers');
 
 let ctxServer, browser, base, overrides;
 
@@ -90,7 +90,7 @@ test('the app loads and plays with the network cut', async () => {
   // Offline is only meaningful if it is actually playable offline.
   await page.locator('#start').tap();
   await page.waitForTimeout(200);
-  await digDown(page, 0.78);
+  await digDown(page, await aimAt(page, 'crystal'));
   const progressed = await until(page, async () =>
     parseInt(await text(page, '#collected'), 10) > 0
   );

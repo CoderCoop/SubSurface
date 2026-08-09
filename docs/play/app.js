@@ -14,6 +14,41 @@
 
   var GRID_W = 120,
     GRID_H = 200;
+
+  /*
+   * The level bank (levels.js), if it loaded.
+   *
+   * A banked level is a spec the generator searched for and the solver signed
+   * off; a level with no entry falls back to difficultyFor(), which is the
+   * procedural game the bank grew out of. So the two paths are "the levels we
+   * verified" and "the levels we can always make", and losing the first leaves
+   * a working game rather than none.
+   *
+   * The seed comes out of the SPEC and not out of the level number, because it
+   * is what places the rib, the pockets and the shelf offsets — a banked level
+   * built with the wrong seed is a different level from the one that was
+   * measured.
+   */
+  var BANK = typeof window.SubsurfaceLevels === 'object' ? window.SubsurfaceLevels : null;
+
+  function specFor(n) {
+    if (BANK && BANK.levels && BANK.levels[n]) return BANK.levels[n];
+    return null;
+  }
+
+  function levelOpts(n) {
+    var spec = specFor(n);
+    return spec
+      ? { w: GRID_W, h: GRID_H, seed: spec.seed === undefined ? n : spec.seed, spec: spec }
+      : { w: GRID_W, h: GRID_H, seed: n };
+  }
+
+  // The dials of a level, banked or derived, for anything that wants to
+  // describe a level without building it.
+  function dialsFor(n) {
+    return specFor(n) || S.difficultyFor(n);
+  }
+
   var STEPS_PER_FRAME = 4;
   var STALL_FRAMES = 240; // ~4s of no change before calling a settled level over
   var DIG_RADIUS = 4; // constant, per spec §2.1
@@ -308,7 +343,7 @@
 
   function reset(newSeed) {
     seed = newSeed === undefined ? seed : newSeed;
-    sim = S.buildLevel({ w: GRID_W, h: GRID_H, seed: seed });
+    sim = S.buildLevel(levelOpts(seed));
     bodies = new B.Bodies(sim);
     outcome = null;
     passed = false;
@@ -1264,7 +1299,7 @@
 
   // What each chamber is worth saying in the two characters it has room for.
   function nodeNote(n) {
-    var D = S.difficultyFor(n);
+    var D = dialsFor(n);
     if (D.baffles > 0) return D.baffles + (D.fractured ? 'r' : D.sand ? 's' : 'c');
     return D.fractured ? 'rock' : D.sand ? 'sand' : 'clay';
   }
