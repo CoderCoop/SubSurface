@@ -13,13 +13,17 @@
  * rules good enough to reason with would be a second implementation to keep
  * in step with the first.
  *
- * Two questions per level, and they are different questions:
+ * Three questions per level, and they are different questions:
  *
  *   winnable     does at least one plan clear the target
  *   interesting  do the OBVIOUS plans fail
+ *   fun          is the SHAPE of the outcomes right
  *
  * A level nobody can beat is broken. A level a straight drop beats is boring.
- * The generator wants both answers and neither alone.
+ * A level where every approximate answer scores the same as the exact one has
+ * no skill in it even though it passes both of the first two tests — which is
+ * why the third question exists, and why the answer to it is a distribution
+ * rather than a number. See `profile` below.
  */
 
 const S = require('../docs/play/sim.js');
@@ -28,6 +32,16 @@ const B = require('../docs/play/bodies.js');
 const GRID_W = 120;
 const GRID_H = 200; // the grid the game actually plays on; see note below
 const DIG_R = 4; // matches DIG_RADIUS in app.js
+
+/*
+ * The star tiers, mirrored from TIERS in app.js. The whole criterion below is
+ * expressed in them, because "is this level fun" is not a separate scale from
+ * "what does the player see when they clear it" — a level is fun when the
+ * tiers it hands out actually discriminate. If they move there, move them here.
+ */
+const WIN = 85; // 1★ — you found a line
+const TWO = 92; // 2★
+const THREE = 97; // 3★ — you found THE line
 
 /*
  * Verification runs at the play resolution on purpose. Levels are authored in
@@ -69,8 +83,32 @@ function stroke(sim, bodies, s) {
  * see where the pile lands, then route around it" cannot know its later
  * strokes until the earlier ones have played out. The function is handed the
  * sim between phases.
+ *
+ * Two thresholds, and conflating them was the bug that made a distribution
+ * impossible to measure:
+ *
+ *   stopAt        stop as soon as this much is banked. Nothing later can
+ *                 un-collect it, so the run is over and the number is exact.
+ *   giveUpBelow   stop once the level can no longer reach this much, however
+ *                 long it runs. The number reported is then a LOWER BOUND, and
+ *                 the row is flagged `bailed` to say so.
+ *
+ * They used to be one argument, which is fine for a yes/no question and wrong
+ * for a measurement: asking "what exactly does this plan score" by passing
+ * target = 100 made the give-up test fire on the first drop lost to a drain,
+ * so a plan that would have settled at 91% was reported at whatever it had
+ * banked in its first few hundred steps. Judging keeps them equal; profiling
+ * sets stopAt to the top tier and gives up only below the pass mark, so every
+ * number that lands in the band the criterion cares about is exact.
  */
-function play(spec, plan, target) {
+function play(spec, plan, target, opts) {
+  if (typeof target === 'object' && target !== null) {
+    opts = target;
+    target = undefined;
+  }
+  opts = opts || {};
+  const stopAt = opts.stopAt === undefined ? target : opts.stopAt;
+  const giveUpBelow = opts.giveUpBelow === undefined ? stopAt : opts.giveUpBelow;
   const sim = build(spec);
   const bodies = new B.Bodies(sim);
   const phases = typeof plan.cuts === 'function' ? plan.cuts(sim) : plan.cuts;
@@ -80,6 +118,7 @@ function play(spec, plan, target) {
   let stall = 0;
   let last = '';
   let dug = 0;
+  let bailed = false;
 
   for (const phase of phases) {
     for (const s of phase.strokes || []) dug += stroke(sim, bodies, s).removed;
@@ -97,12 +136,15 @@ function play(spec, plan, target) {
 
     const st = sim.stats();
     if (st.collectionPct > best) best = st.collectionPct;
-    if (best >= target) break; // done; nothing later can un-collect it
+    if (best >= stopAt) break; // done; nothing later can un-collect it
 
     // The ceiling: everything not yet lost to a drain. Once that is under the
-    // target the level cannot be won however long it runs.
+    // threshold the level cannot reach it however long it runs.
     const ceiling = ((st.released - st.lost) / st.released) * 100;
-    if (ceiling < target) break;
+    if (ceiling < giveUpBelow) {
+      bailed = true;
+      break;
+    }
 
     /*
      * The signature has to be able to see movement. Counting only what has
@@ -121,7 +163,7 @@ function play(spec, plan, target) {
 
   const st = sim.stats();
   if (st.collectionPct > best) best = st.collectionPct;
-  return { pct: best, dug, steps, balanced: st.balanced };
+  return { pct: best, dug, steps, balanced: st.balanced, bailed };
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +182,7 @@ function naivePlans(sim) {
     const x = Math.round(g.wall + 2 + ((GRID_W - 2 * g.wall - 4) * i) / 9);
     out.push({
       name: 'drop@' + x,
+      kind: 'naive',
       naive: true,
       x,
       cuts: [{ strokes: [{ x0: x, y0: g.sealTop - 1, x1: x, y1: g.floorY - 1 }] }]
@@ -163,16 +206,91 @@ function naivePlans(sim) {
  * level has no answer the game itself knows about.
  */
 function routePlan(sim) {
+  return { name: 'route', kind: 'route', cuts: [{ strokes: routeStrokes(sim) }] };
+}
+
+/*
+ * The strokes of the intended lane, optionally aimed wrong.
+ *
+ * `shift` slides every waypoint sideways — the player who read the level as a
+ * whole slightly off. `aim` slides only the last one, the drop onto the basin —
+ * the player who found the right way down and then missed the crystal. Both are
+ * clamped inside the walls, so a large error becomes a plan that hugs the wall
+ * rather than a plan that digs outside the level.
+ */
+function routeStrokes(sim, shift, aim) {
   const g = sim.geometry;
+  const lo = g.wall + 1,
+    hi = sim.w - g.wall - 2;
+  const clamp = (x) => (x < lo ? lo : x > hi ? hi : x);
   const strokes = [];
-  let px = g.route[0].x,
+  let px = clamp(g.route[0].x + (shift || 0)),
     py = g.sealTop - 1;
-  for (const p of g.route) {
-    strokes.push({ x0: px, y0: py, x1: p.x, y1: p.y });
-    px = p.x;
-    py = p.y;
+  for (let i = 0; i < g.route.length; i++) {
+    const last = i === g.route.length - 1;
+    const x = clamp(g.route[i].x + (shift || 0) + (last ? aim || 0 : 0));
+    strokes.push({ x0: px, y0: py, x1: x, y1: g.route[i].y });
+    px = x;
+    py = g.route[i].y;
   }
-  return { name: 'route', cuts: [{ strokes }] };
+  return strokes;
+}
+
+/*
+ * The rough ones: the intended route, cut by somebody who had the idea but not
+ * the precision.
+ *
+ * This family is what makes the criterion measurable at all. Winnable and
+ * interesting are both satisfied by a level with exactly one answer and a cliff
+ * either side of it — dig the line and collect everything, miss it by a cell
+ * and collect nothing — which is not a puzzle, it is a lock. What the game
+ * wants is a gradient: the exact line aces, a near miss still passes, a wild
+ * miss does not. You cannot see a gradient by sampling one point, so these are
+ * the other points.
+ *
+ * Errors are scaled to the level's own landing zone rather than fixed in cells,
+ * and the scale that matters is the crystal PLUS its apron, not the crystal
+ * alone. A first attempt sized them to half the basin and to the basin, which
+ * measured nothing at all: the basin on an early level is thirty cells across,
+ * so the largest error still landed on the collector and every rough plan
+ * scored within a point of the exact one whatever the terrain did. The
+ * distribution was flat because the probe never left the target.
+ *
+ * So the four steps go: comfortably inside, on the lip, out on the apron, and
+ * past it. That is the run from "found the line" to "missed", and where a level
+ * puts the tiers along it is exactly what the criterion is asking about.
+ */
+function roughPlans(sim) {
+  const g = sim.geometry;
+  const basin = Math.max(3, Math.round((g.basinR - g.basinL) / 2));
+  const apron = Math.max(2, g.apron);
+  const out = [];
+  const steps = [
+    ['in', Math.max(2, Math.round(basin / 2))],
+    ['lip', basin],
+    ['apron', basin + Math.round(apron / 2)],
+    ['past', basin + apron + 2]
+  ];
+  for (const [label, mag] of steps)
+    for (const sign of [-1, 1])
+      out.push({
+        name: 'aim' + label + (sign > 0 ? '+' : '-') + mag,
+        kind: 'rough',
+        cuts: [{ strokes: routeStrokes(sim, 0, sign * mag) }]
+      });
+  /*
+   * And the same error made higher up: the player who took the whole line
+   * across a shelf slightly wrong rather than fumbling only the last drop.
+   */
+  for (const sign of [-1, 1]) {
+    const d = sign * (basin + Math.round(apron / 2));
+    out.push({
+      name: 'shift' + (d > 0 ? '+' : '') + d,
+      kind: 'rough',
+      cuts: [{ strokes: routeStrokes(sim, d, 0) }]
+    });
+  }
+  return out;
 }
 
 /*
@@ -196,31 +314,24 @@ function collapsePlans(sim) {
     y1: p[1] + p[2] + 2
   }));
 
-  const routeStrokes = () => {
-    const strokes = [];
-    let px = g.route[0].x,
-      py = g.sealTop - 1;
-    for (const p of g.route) {
-      strokes.push({ x0: px, y0: py, x1: p.x, y1: p.y });
-      px = p.x;
-      py = p.y;
-    }
-    return strokes;
-  };
-
   for (let i = 0; i < undercuts.length; i++) {
     out.push({
       name: 'collapse' + i + '+route',
+      kind: 'collapse',
       cuts: [
         { strokes: [undercuts[i]], settle: 1400 },
-        { strokes: routeStrokes() }
+        { strokes: routeStrokes(sim) }
       ]
     });
   }
   if (undercuts.length > 1) {
     out.push({
       name: 'collapse*+route',
-      cuts: [{ strokes: undercuts, settle: 1600 }, { strokes: routeStrokes() }]
+      kind: 'collapse',
+      cuts: [
+        { strokes: undercuts, settle: 1600 },
+        { strokes: routeStrokes(sim) }
+      ]
     });
   }
   return out;
@@ -273,4 +384,204 @@ function judge(spec, opts = {}) {
   };
 }
 
-module.exports = { judge, play, build, naivePlans, routePlan, collapsePlans, GRID_W, GRID_H };
+// ---------------------------------------------------------------------------
+// The distribution
+// ---------------------------------------------------------------------------
+
+/*
+ * Which star tier a score lands in. `0` is a failure — under the pass mark.
+ */
+function bandOf(pct) {
+  return pct >= THREE ? 3 : pct >= TWO ? 2 : pct >= WIN ? 1 : 0;
+}
+
+/*
+ * Profile a spec: run every plan, keep every score, and say whether the shape
+ * of them is the shape a good level has.
+ *
+ * The criterion, in the owner's words: "there should be a challenge in finding
+ * the right path, but it must be doable" — one exact answer scoring near 100%,
+ * a few rougher answers passing in the 85–92 band, and every naive straight
+ * drop under 85%. Written out as three clauses that a spec either meets or does
+ * not:
+ *
+ *   ace         some plan reaches 3★. There IS a line, and finding it is worth
+ *               something. Without this the level tops out at "adequate" and
+ *               the top tier is unreachable, which is a scoreboard with a dead
+ *               row in it.
+ *   forgiving   some plan lands in [85, 92) — 1★. A near miss still gets home.
+ *               Without this the level is a lock rather than a puzzle: the only
+ *               scores available are ace and nothing, and there is no partial
+ *               credit for having half the idea.
+ *   hard        every naive drop is under 85. Nothing about the level can be
+ *               had by dragging downwards and hoping.
+ *
+ * All three, or it is not a level worth banking.
+ *
+ * Ordering is chosen so the common rejections are cheap, because the generator
+ * runs this on thousands of specs and almost all of them are bad. The route
+ * goes first (one simulation kills anything with no answer at all), then the
+ * naive drops nearest the crystal (one or two more kill anything boring), and
+ * only a spec that has survived both pays for the rough family. `opts.full`
+ * turns the short-circuiting off, which is what the report and the tests want.
+ */
+function profile(spec, opts = {}) {
+  const full = !!opts.full;
+  const minRough = opts.minRough === undefined ? 1 : opts.minRough;
+  const probe = build(spec);
+  const rows = [];
+  const settings = { stopAt: THREE, giveUpBelow: WIN };
+
+  let broke = null;
+  const run = (p) => {
+    const r = play(spec, p, settings);
+    if (!r.balanced) broke = broke || p.name;
+    const row = {
+      name: p.name,
+      kind: p.kind || 'route',
+      pct: r.pct,
+      band: bandOf(r.pct),
+      dug: r.dug,
+      steps: r.steps,
+      // The score is exact unless the run was abandoned as hopeless, in which
+      // case it is a lower bound — and known to be under the pass mark, which
+      // is the only thing anyone asks of a failing plan.
+      exact: !r.bailed
+    };
+    rows.push(row);
+    return row;
+  };
+
+  // 1. Is there an answer at all?
+  const route = run(routePlan(probe));
+  if (broke) return { error: 'conservation broke on ' + broke, rows };
+  if (!full && route.pct < THREE) return verdict(rows, minRough, 'no ace: route ' + route.pct.toFixed(1));
+
+  // 2. Is it obvious?
+  for (const p of naivePlans(probe)) {
+    const r = run(p);
+    if (broke) return { error: 'conservation broke on ' + broke, rows };
+    if (!full && r.band > 0) return verdict(rows, minRough, 'naive ' + p.name + ' clears it');
+  }
+
+  // 3. Does a near miss still get home?
+  for (const p of [...roughPlans(probe), ...collapsePlans(probe)]) {
+    run(p);
+    if (broke) return { error: 'conservation broke on ' + broke, rows };
+  }
+  return verdict(rows, minRough);
+}
+
+function verdict(rows, minRough, bailedBecause) {
+  const naive = rows.filter((r) => r.kind === 'naive');
+  const solved = rows.filter((r) => r.kind !== 'naive');
+  const top = (rs) => rs.reduce((a, b) => (b.pct > a.pct ? b : a), { pct: 0, name: null, dug: 0 });
+
+  const best = top(solved);
+  const naiveBest = top(naive);
+  const naiveWins = naive.filter((r) => r.band > 0).length;
+  const rough = solved.filter((r) => r.band === 1).length;
+  const aces = solved.filter((r) => r.band === 3).length;
+
+  // A histogram over the tiers, which is the whole point of the exercise: the
+  // shape of it says more than any single number pulled out of it.
+  const bands = [0, 0, 0, 0];
+  for (const r of solved) bands[r.band]++;
+  const naiveBands = [0, 0, 0, 0];
+  for (const r of naive) naiveBands[r.band]++;
+
+  const ace = aces >= 1;
+  const forgiving = rough >= minRough;
+  const hard = naiveWins === 0;
+  const reasons = [];
+  if (!ace) reasons.push('no plan reaches ' + THREE + '%');
+  if (!forgiving) reasons.push('nothing passes roughly (' + rough + ' in ' + WIN + '–' + TWO + ')');
+  if (!hard) reasons.push(naiveWins + ' naive drop(s) clear it');
+  if (bailedBecause) reasons.push('short-circuited: ' + bailedBecause);
+
+  return {
+    rows,
+    // The old three-value verdict, unchanged in meaning, so callers that only
+    // want a yes/no keep working.
+    winnable: best.pct >= WIN,
+    interesting: best.pct >= WIN && naiveWins === 0,
+    // The new one.
+    fun: ace && forgiving && hard,
+    ace,
+    forgiving,
+    hard,
+    best: best.pct,
+    plan: best.name,
+    dug: best.dug,
+    naiveBest: naiveBest.pct,
+    naiveWins,
+    rough,
+    aces,
+    bands,
+    naiveBands,
+    margin: best.pct - naiveBest.pct,
+    // A spec rejected early has not run every plan, so its distribution is
+    // partial. Say so rather than letting a caller read a zero as a measurement.
+    partial: !!bailedBecause,
+    reasons
+  };
+}
+
+/*
+ * One line summarising a profile, for the verification report and the CLI.
+ */
+function summarise(p) {
+  if (p.error) return p.error;
+  const b = p.bands;
+  return (
+    (p.fun ? 'FUN ' : p.interesting ? 'ok  ' : p.winnable ? 'dull' : 'BAD ') +
+    '  best ' + p.best.toFixed(1).padStart(5) + '% (' + (p.plan || '—') + ')' +
+    '  naive ' + p.naiveBest.toFixed(1).padStart(5) + '%' +
+    '  tiers ' + b[3] + '★★★/' + b[2] + '★★/' + b[1] + '★/' + b[0] + '✗' +
+    (p.partial ? '  [partial]' : '') +
+    (p.fun ? '' : '  — ' + p.reasons.join('; '))
+  );
+}
+
+module.exports = {
+  judge,
+  profile,
+  verdict,
+  summarise,
+  play,
+  build,
+  naivePlans,
+  routePlan,
+  roughPlans,
+  collapsePlans,
+  routeStrokes,
+  bandOf,
+  GRID_W,
+  GRID_H,
+  WIN,
+  TWO,
+  THREE
+};
+
+/*
+ * `node tools/solve.js 4 [13 …]` — profile levels and print the table. This is
+ * the thing you actually reach for when a level is wrong: the distribution says
+ * which way it is wrong, which the pass/fail from the test suite cannot.
+ */
+if (require.main === module) {
+  const S2 = require('../docs/play/sim.js');
+  const args = process.argv.slice(2).map(Number).filter((n) => Number.isFinite(n));
+  for (const n of args.length ? args : [1]) {
+    const spec = Object.assign(S2.difficultyFor(n), { level: n, seed: n });
+    const p = profile(spec, { full: true });
+    process.stdout.write('\nlevel ' + n + '  ' + summarise(p) + '\n');
+    if (p.rows)
+      for (const r of p.rows.slice().sort((a, b) => b.pct - a.pct))
+        process.stdout.write(
+          '  ' + r.kind.padEnd(9) + r.name.padEnd(16) +
+            r.pct.toFixed(1).padStart(6) + '%  ' +
+            (r.band ? '★'.repeat(r.band) : '—').padEnd(4) +
+            (r.exact ? '' : ' (at least)') + '\n'
+        );
+  }
+}

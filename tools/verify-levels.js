@@ -88,18 +88,36 @@ function report() {
   const judged = results.filter((r) => r.interesting !== undefined);
   const puzzles = judged.filter((r) => r.interesting);
 
-  process.stdout.write('\ninterest sample (does a straight drop beat it?)\n');
-  for (const r of judged)
+  /*
+   * The distribution, not just the verdict.
+   *
+   * "Winnable" and "needs a real route" are both satisfied by a level with one
+   * answer and a cliff either side of it, which is a lock rather than a puzzle.
+   * What says whether a level is worth playing is the SHAPE of the scores its
+   * plans get — how many ace, how many scrape a pass, how many fail — so that
+   * is what gets printed. See `profile` in solve.js for the criterion.
+   */
+  const fun = judged.filter((r) => r.fun);
+  process.stdout.write(
+    '\nsample distribution (plans by tier: ★★★ / ★★ / ★ / failed)\n'
+  );
+  for (const r of judged) {
+    const b = r.bands || [0, 0, 0, 0];
     process.stdout.write(
       `  level ${String(r.level).padStart(3)}  ` +
-        (r.interesting ? 'needs a real route' : `beaten by ${r.naiveWins} naive drop(s)`) +
+        `${b[3]}/${b[2]}/${b[1]}/${b[0]}  ` +
+        `best ${(r.best || 0).toFixed(1).padStart(5)}%  ` +
+        `naive ${(r.naiveBest || 0).toFixed(1).padStart(5)}%  ` +
+        (r.fun ? 'fun' : (r.reasons || []).join('; ')) +
         '\n'
     );
+  }
 
   const secs = ((Date.now() - started) / 1000).toFixed(0);
   process.stdout.write(
     `\n${results.length - failed.length}/${results.length} winnable, ` +
-      `${puzzles.length}/${judged.length} of the sample need a real route ` +
+      `${puzzles.length}/${judged.length} of the sample need a real route, ` +
+      `${fun.length}/${judged.length} meet the full criterion ` +
       `(${secs}s on ${workerCount} workers)\n`
   );
 
