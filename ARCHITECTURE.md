@@ -53,6 +53,16 @@ Three things about it are contracts, not implementation details:
 - **Out of bounds reads as bedrock.** A level is sealed unless a drain says
   otherwise, so fluid can never fall off the edge of the grid uncounted.
 
+**Heat vents (`VENT`)** are the one hazard whose cost is measured in *time*
+rather than in ground: every other hazard punishes where you cut, and a vent
+punishes how long the payload spends beside it. They are uncuttable, they do not
+move, and a unit they boil off is counted as **`lost`**, not as a fifth bucket —
+`lost` has always meant "removed from play and not collected", which is exactly
+what evaporation is. That keeps the conservation invariant true for the right
+reason, and it means the solver's ceiling calculation already knows a level
+dawdled through becomes unwinnable, without being told vents exist. They arrive
+at stage 31, which is where spec §5 puts environmental hazards.
+
 `buildLevel()` also lives here: it turns a **spec** into terrain. See below.
 
 ### `docs/play/bodies.js` — the rigid-body layer

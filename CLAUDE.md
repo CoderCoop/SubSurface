@@ -86,6 +86,12 @@ These are all measured, not theoretical. Each one shipped.
 - **A crowned floor must be built upward**, with the crest rising above the
   outer floor. Dropping the flanks instead pushes them past the bottom of the
   grid, the floor-drawing loop runs zero times, and the drains silently vanish.
+- **A hazard that removes fluid counts it as `lost`**, never as a new bucket.
+  `released = inPlay + collected + lost + heldBySand` is asserted after every
+  step of every run, and `lost` already means "removed from play and not
+  collected". Adding a bucket would mean touching every conservation test and
+  the solver's ceiling calculation, to express something the existing one
+  already says.
 - **`levels.js` is precached by the service worker**, and `cache.addAll` rejects
   wholesale if any entry 404s. If the bank file goes, take it out of `SHELL`.
 - **A browser drag has two ends and both of them move.** Start above the clay

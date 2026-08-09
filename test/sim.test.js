@@ -777,15 +777,126 @@ test('no straight shaft reaches the crystal once the roof is in', () => {
 
     const from = Math.max(g.wall, g.basinL - g.apron);
     const to = Math.min(sim.w - g.wall - 1, g.basinR + g.apron);
+    // Bedrock or a heat vent: what matters is that the dig cannot remove it,
+    // and a vent is hot rock rather than a different kind of hole.
+    const roofs = (m) => m === MAT.BEDROCK || m === MAT.VENT;
     for (let x = from; x <= to; x++) {
       let blocked = false;
       for (let y = g.sealTop; y < g.floorY && !blocked; y++)
-        if (sim.raw(x, y) === MAT.BEDROCK) blocked = true;
+        if (roofs(sim.raw(x, y))) blocked = true;
       assert.ok(
         blocked,
         `level ${n}: a straight shaft at x=${x} reaches the crystal (basin ` +
           `${g.basinL}–${g.basinR}, apron ${g.apron}) without meeting bedrock`
       );
     }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Heat vents — the one hazard whose cost is time rather than ground
+// ---------------------------------------------------------------------------
+
+test('a heat vent boils off the fluid touching it, and the unit is accounted', () => {
+  const sim = blank(21, 20);
+  for (let x = 1; x < 20; x++) put(sim, x, 15, MAT.CLAY);
+  // Fluid either side of the vent, never on it — writing the pool over the top
+  // of the vent is how the first version of this test managed to pass nothing.
+  for (let x = 6; x < 15; x++) if (x !== 10) put(sim, x, 14, MAT.WATER);
+  put(sim, 10, 14, MAT.VENT);
+  const released = sim.released;
+
+  for (let i = 0; i < 600; i++) {
+    sim.step();
+    const s = sim.stats();
+    assert.ok(s.balanced, `step ${i}: accounting broke`);
+  }
+
+  const s = sim.stats();
+  assert.ok(s.lost > 0, 'a vent should have taken something');
+  assert.strictEqual(s.collected, 0, 'there is nothing here to collect');
+  assert.strictEqual(s.inPlay + s.lost, released, 'every unit is still counted');
+});
+
+test('a vent dries saturated sand rather than letting it hide the payload', () => {
+  // Otherwise the answer to a vent is to soak the payload into the nearest
+  // bank and sit there until the level is over.
+  const sim = blank(21, 20);
+  for (let x = 1; x < 20; x++) put(sim, x, 15, MAT.CLAY);
+  put(sim, 10, 14, MAT.VENT);
+  put(sim, 11, 14, MAT.WETSAND);
+  sim.released = 1;
+
+  assert.strictEqual(sim.stats().heldBySand, 1);
+  let dried = false;
+  for (let i = 0; i < 800 && !dried; i++) {
+    sim.step();
+    dried = sim.stats().heldBySand === 0;
+    assert.ok(sim.stats().balanced);
+  }
+  assert.ok(dried, 'wet sand beside a vent should give up its unit');
+  assert.strictEqual(sim.stats().lost, 1, 'and it should be counted as lost');
+});
+
+test('a vent is rock: it cannot be dug and nothing slides into it', () => {
+  const sim = blank(21, 20);
+  for (let x = 8; x < 13; x++) put(sim, x, 15, MAT.VENT);
+  const before = count(sim, MAT.VENT);
+  sim.dig(10, 15, 4);
+  assert.strictEqual(count(sim, MAT.VENT), before, 'a vent should survive a dig');
+
+  // Sand resting above one stays above it.
+  put(sim, 10, 14, MAT.SAND);
+  run(sim, 200);
+  assert.strictEqual(sim.raw(10, 15), MAT.VENT, 'the vent is still there');
+  assert.strictEqual(count(sim, MAT.SAND), 1, 'and the grain was not swallowed');
+});
+
+test('lingering beside a vent costs more than getting past it', () => {
+  /*
+   * The whole design claim, measured rather than asserted: the same terrain,
+   * the same cut, and the only difference is how long the payload is left in
+   * contact with the hot rock. A hazard that costs the same however you play
+   * is scenery.
+   */
+  const cost = (steps) => {
+    const sim = blank(41, 30);
+    for (let x = 1; x < 40; x++) put(sim, x, 24, MAT.CLAY);
+    for (let x = 18; x < 23; x++) put(sim, x, 23, MAT.VENT);
+    for (let y = 20; y < 23; y++)
+      for (let x = 10; x < 31; x++) put(sim, x, y, MAT.WATER);
+    run(sim, steps);
+    return sim.stats().lost;
+  };
+  const brief = cost(150);
+  const long = cost(900);
+  assert.ok(
+    long > brief,
+    `a vent took ${brief} units in 150 steps and ${long} in 900 — it should keep charging`
+  );
+});
+
+test('a level with vents still balances, and they sit on the shelf tips', () => {
+  const sim = build({ w: 120, h: 200, seed: 33, level: 33 });
+  const g = sim.geometry;
+  assert.ok(g.difficulty.vents > 0, 'the deep band should have vents');
+  assert.ok(g.ventAt.length > 0, 'and they should have been placed');
+
+  // Each seam is at a shelf, and at the end of it that the route goes round.
+  for (const [v0, v1, vy] of g.ventAt) {
+    assert.ok(g.baffleY.indexOf(vy) !== -1, 'a vent seam should be part of a shelf');
+    assert.ok(v1 > v0, 'and should be a seam rather than nothing');
+    const gapL = g.baffleGapL[g.baffleY.indexOf(vy)];
+    const gapR = g.baffleGapR[g.baffleY.indexOf(vy)];
+    assert.ok(
+      Math.min(Math.abs(v1 - gapL), Math.abs(v0 - gapR)) <= 1,
+      `vent seam ${v0}–${v1} should be at the lip of the gap ${gapL}–${gapR}`
+    );
+  }
+
+  carveIdealChannel(sim);
+  for (let i = 0; i < 900; i++) {
+    sim.step();
+    assert.ok(sim.stats().balanced, `step ${i}: accounting broke with vents in play`);
   }
 });

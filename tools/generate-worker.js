@@ -91,6 +91,13 @@ function sample(n, rand) {
    * should be the lane and nothing else.
    */
   spec.gravel = n < 8 ? 0 : rand() < 0.55 ? 1 : 2;
+  /*
+   * Heat vents from the band that teaches them, and never before it — like
+   * sand and fractured rock, this is progression rather than shape. How MANY
+   * is shape, so that is sampled: one hot shelf tip is a tax on the last
+   * corner, two taxes the whole descent.
+   */
+  spec.vents = base.vents > 0 ? (rand() < 0.6 ? 1 : 2) : 0;
   return spec;
 }
 

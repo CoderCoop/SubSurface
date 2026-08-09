@@ -7,7 +7,8 @@
  *
  * NOT implemented here, by design: the rigid-body layer for fractured rock
  * (spec §4.1 secondary system), chunk sleeping, multithreading/compute
- * shaders, multi-fluid and heat hazards.
+ * shaders and multi-fluid. Heat hazards ARE implemented — see VENT below and
+ * the shelf-lip seams in buildLevel; they are the stage-31 hazard from spec §5.
  *
  * ---------------------------------------------------------------------------
  * Volume accounting
@@ -43,7 +44,8 @@
     COLLECTOR = 6,
     DRAIN = 7,
     FRACTURED = 8,
-    GRAVEL = 9;
+    GRAVEL = 9,
+    VENT = 10;
 
   var MAT = {
     EMPTY: EMPTY,
@@ -55,7 +57,8 @@
     COLLECTOR: COLLECTOR,
     DRAIN: DRAIN,
     FRACTURED: FRACTURED,
-    GRAVEL: GRAVEL
+    GRAVEL: GRAVEL,
+    VENT: VENT
   };
 
   var NAMES = {};
@@ -69,6 +72,7 @@
   NAMES[DRAIN] = 'drain';
   NAMES[FRACTURED] = 'fractured rock';
   NAMES[GRAVEL] = 'gravel';
+  NAMES[VENT] = 'heat vent';
 
   // Earthy, muted terrain against a vibrant teal payload (spec §3.1).
   var COLORS = {};
@@ -82,6 +86,9 @@
   COLORS[DRAIN] = [12, 10, 8];
   COLORS[FRACTURED] = [90, 107, 120];
   COLORS[GRAVEL] = [122, 116, 102];
+  // Hot rock: the one thing down here that is not earth-toned, because it is
+  // the one thing that costs you payload just by being near it (spec §3.1).
+  COLORS[VENT] = [176, 72, 44];
 
   // Deterministic PRNG: same seed means the same run, which is what makes the
   // integration tests meaningful and lets a level be replayed exactly.
@@ -139,6 +146,20 @@
     this.flowReachMax = 20;
     this.releaseHead = 5; // head needed to squeeze fluid back out of wet sand
     this.releaseChance = 0.35; // per-frame chance a pressured cell lets go
+    /*
+     * Heat. Per-frame chance that a vent boils off one unit of whatever fluid
+     * is touching it. Low on purpose: a vent is a tax on lingering, not a wall.
+     * Getting past one costs a little; letting the payload pool against one
+     * costs steadily until you move it on.
+     *
+     * Measured on two banked levels, cutting the intended route: at 0.09 the
+     * route itself drops from 98% to 81% and the level is simply unwinnable —
+     * a hazard nobody can pay is a wall with extra steps. At 0.01 it costs
+     * half a point and may as well not be there. 0.02 takes the route from
+     * 98.1% to 94.8% on one and 97.6% to 96.9% on the other: a clean line
+     * still gets home and still has to be a clean line.
+     */
+    this.ventRate = 0.02;
 
     this.waterSurface = 0;
     this.geometry = null;
@@ -478,6 +499,58 @@
     return false;
   };
 
+  /*
+   * Heat vents (spec §5, stage 31+: "environmental hazards — heat sources that
+   * evaporate fluid").
+   *
+   * A seam of hot rock in the wall. It boils off fluid that touches it, and
+   * that is all it does — it cannot be dug, it does not move, and it takes no
+   * account of anything but adjacency. What makes it interesting is that its
+   * cost is measured in TIME rather than in ground: every other hazard in the
+   * game punishes where you cut, and this one punishes how long you leave the
+   * payload sitting there.
+   *
+   * The unit is counted as lost, not destroyed. Everything the volume
+   * accounting says stays true — `released = inPlay + collected + lost +
+   * heldBySand` — and it stays true for the right reason rather than by
+   * bookkeeping: `lost` has always meant "removed from play and not
+   * collected", which is exactly what boiling off is. The solver's ceiling
+   * calculation is over `lost`, so it already knows that a level dawdled
+   * through becomes unwinnable, without being told about vents at all.
+   *
+   * Saturated sand is not a hiding place: a vent dries the grain beside it and
+   * the unit it was holding goes with it. Otherwise the answer to a vent would
+   * be to soak the payload into the nearest bank and wait.
+   */
+  Sim.prototype.ventAt = function (x, y) {
+    if (this.rand() >= this.ventRate) return false;
+    var d = this.rand() < 0.5 ? 1 : -1;
+    var near = [
+      [x, y - 1],
+      [x + d, y],
+      [x - d, y],
+      [x, y + 1]
+    ];
+    for (var k = 0; k < near.length; k++) {
+      var nx = near[k][0],
+        ny = near[k][1];
+      // Through `get`, like every other rule: a rock chunk resting against the
+      // vent shields what is behind it.
+      var m = this.get(nx, ny);
+      if (m === WATER) {
+        this.set(nx, ny, EMPTY);
+        this.lost++;
+        return true;
+      }
+      if (m === WETSAND) {
+        this.set(nx, ny, SAND);
+        this.lost++;
+        return true;
+      }
+    }
+    return false;
+  };
+
   Sim.prototype.updateSand = function (x, y, mat) {
     var below = this.get(x, y + 1);
     if (below === EMPTY || below === WATER) {
@@ -544,6 +617,7 @@
           if (!this.tryRelease(x, y)) this.updateSand(x, y, WETSAND);
         } else if (m === SAND) this.updateSand(x, y, SAND);
         else if (m === GRAVEL) this.updateSand(x, y, GRAVEL);
+        else if (m === VENT) this.ventAt(x, y);
       }
     }
   };
@@ -853,6 +927,17 @@
        * impossible to do by accident.
        */
       gravel: 0,
+      /*
+       * Heat vents: how many shelf tips are hot rock. A tax on lingering
+       * rather than on ground — see where they are laid, in buildLevel.
+       *
+       * The last of the materials to arrive, at stage 31 — which is where the
+       * spec puts environmental hazards, and it is the right place for its own
+       * reasons too. It is the only hazard whose cost is measured in time
+       * rather than in ground, so it wants a player who is no longer thinking
+       * about where the sand is.
+       */
+      vents: n >= 31 ? 1 : 0,
       // A bedrock column standing on the cavern floor, splitting what lands.
       pillar: 0
     };
@@ -1294,6 +1379,43 @@
         for (x = baffleShelf[bJ][0]; x < baffleShelf[bJ][1]; x++)
           sim.set(x, y, BEDROCK);
 
+    /*
+     * Hot rock at the lip of a shelf (spec §5, stage 31+).
+     *
+     * A vent is only a hazard if the payload has to go near it, and the one
+     * place every route must pass is the open end of a shelf — that is what a
+     * shelf is for. So the last few cells of the tip are hot rock rather than
+     * cold, and rounding the corner costs whatever the fluid leaves in contact
+     * with it.
+     *
+     * That makes the cost a function of TIME rather than of ground, which is
+     * the thing the level set did not have. Every other hazard here punishes
+     * WHERE you cut; this one punishes how long the payload spends getting
+     * past. A clean drop through the gap pays a little. A channel that pools
+     * against the lip, or one that has to build head before it will move at
+     * all, pays for as long as it sits there.
+     *
+     * On the lowest shelves first — the ones nearest the crystal, where the
+     * fluid is already committed — and laid after the shelves but before
+     * anything else is painted. Nothing painted later can reach them: the sand
+     * band and the fractured slab both sit below the lowest shelf by
+     * construction, and gravel only overwrites clay and sand.
+     */
+    var ventLen = Math.max(2, Math.round(0.035 * w));
+    var ventsLeft = D.vents | 0;
+    var ventAt = [];
+    for (var vI = baffleShelf.length - 1; vI >= 0 && ventsLeft > 0; vI--) {
+      ventsLeft--;
+      var sh = baffleShelf[vI];
+      var shelfFromLeft = sh[0] === WALL;
+      var v0 = shelfFromLeft ? Math.max(sh[0], sh[1] - ventLen) : sh[0],
+        v1 = shelfFromLeft ? sh[1] : Math.min(sh[1], sh[0] + ventLen);
+      ventAt.push([v0, v1, baffleY[vI]]);
+      for (y = baffleY[vI]; y < baffleY[vI] + baffleThick; y++)
+        for (x = v0; x < v1; x++)
+          if (x >= WALL && x < w - WALL) sim.set(x, y, VENT);
+    }
+
     var hasSand = opts.sand !== false && D.sand;
     if (hasSand) {
       sandBot = sandTop + Math.round(D.sandDepth * h);
@@ -1543,6 +1665,7 @@
       basinBot: basinBot,
       drains: drains,
       gravelAt: gravelAt,
+      ventAt: ventAt,
       floorSlope: slope,
       centreX: Math.round(w / 2),
       // Down the clay corridor and into the basin, wherever it has drifted to.
