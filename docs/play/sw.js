@@ -34,6 +34,7 @@ var SHELL = [
   './index.html',
   './app.js',
   './sim.js',
+  './levels.js',
   './bodies.js',
   './vendor/planck.min.js',
   './manifest.webmanifest',

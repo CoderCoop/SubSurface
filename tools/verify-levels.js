@@ -3,17 +3,21 @@
 /*
  * The CI gate on level quality.
  *
- * Two claims, checked by playing the levels rather than by inspecting them:
+ * Three claims, checked by playing the levels rather than by inspecting them:
  *
  *   winnable     the level's own route clears the target, so the game always
- *                has an answer it can show you
+ *                has an answer it can show you — asked of every level
  *   accounted    fluid is conserved end to end, at the play resolution
+ *   the criterion  a BANKED level still meets the standard it was banked
+ *                against: an exact answer that aces, a rough one that scrapes
+ *                a pass, and no straight drop that gets home
  *
- * It also REPORTS, without failing, how many levels a naive straight drop
- * beats. That number is the honest measure of whether the levels are puzzles.
- * It is printed rather than enforced because it is not yet 100%, and a gate
- * nobody can pass is a gate everybody disables. Turn it into a threshold once
- * the generator can hold the line.
+ * The third used to be printed rather than enforced, on the grounds that it was
+ * not yet 100% and a gate nobody can pass is a gate everybody disables. The
+ * generator can hold the line now, so it is a gate — but only over the levels
+ * the generator produced. A derived level has never claimed to meet the
+ * criterion, and gating on one would be gating on the difficulty curve
+ * happening to be lucky at that number; those are still reported only.
  *
  * Run across a process per core: the work is pure CPU with nothing to overlap,
  * so a pool is the only thing that makes this cheap enough to sit inside the
@@ -26,33 +30,57 @@ const os = require('node:os');
 const path = require('node:path');
 const { fork } = require('node:child_process');
 
+const { WIN } = require('./solve.js');
+
 const from = Number(process.argv[2] || 1);
 const to = Number(process.argv[3] || 20);
 
 /*
- * Which levels get the expensive question. Judging interest is ten-odd
- * simulations against one for winnability, so it goes to a spread rather than
- * to everything — enough to catch the curve going flat, not so much that the
- * check stops being affordable.
+ * Which levels get the expensive question.
+ *
+ * The distribution costs twenty-odd simulations against one for winnability —
+ * around four minutes a level on a CI runner — so it goes to a spread rather
+ * than to everything. Enough to catch the bank drifting away from the rules,
+ * which is not a thing that happens to one level in isolation: a change to the
+ * simulation that invalidates level 12 will have invalidated most of its
+ * neighbours too, and any one of them failing is the signal.
+ *
+ * The spread starts at level 4. Levels 1–3 teach the basic move and are meant
+ * to fall to a straight drop, so the criterion does not apply to them and the
+ * gate skips them — profiling one costs the same four minutes to produce a
+ * verdict nobody acts on.
  */
-const INTEREST_SAMPLES = 6;
+const INTEREST_SAMPLES = 4;
+const TEACHING = 3;
 const interest = [];
 {
-  const step = Math.max(1, Math.floor((to - from) / (INTEREST_SAMPLES - 1)));
-  for (let n = from; n <= to && interest.length < INTEREST_SAMPLES; n += step) interest.push(n);
+  const first = Math.max(from, TEACHING + 1);
+  const step = Math.max(1, Math.floor((to - first) / (INTEREST_SAMPLES - 1)));
+  for (let n = first; n <= to && interest.length < INTEREST_SAMPLES; n += step) interest.push(n);
 }
 
 /*
- * Deal levels round-robin rather than in blocks. The cost of a level varies
- * several-fold — an unwinnable one runs to the step cap while a clean one
- * exits early — so contiguous blocks leave one worker holding all the slow
- * ones while the rest sit idle.
+ * Deal the expensive levels first, one per worker, then the rest round-robin.
+ *
+ * Dealing everything round-robin looks fair and is not. The sampled levels are
+ * evenly spaced by construction, so their spacing lines up with the number of
+ * workers whenever one divides the other — and with four samples across
+ * sixteen levels on a four-core runner, every single sample landed on the same
+ * worker. The other three finished in seconds and sat idle while one of them
+ * ran four four-minute profiles back to back, which took the wall clock past
+ * the CI job's timeout for a suite whose total work had just been REDUCED.
+ *
+ * Spreading the known-expensive work first and filling in around it makes the
+ * schedule independent of that coincidence.
  */
 const levels = [];
 for (let n = from; n <= to; n++) levels.push(n);
 const workerCount = Math.max(1, Math.min(os.cpus().length, levels.length));
 const slices = Array.from({ length: workerCount }, () => []);
-levels.forEach((n, i) => slices[i % workerCount].push(n));
+interest.forEach((n, i) => slices[i % workerCount].push(n));
+levels
+  .filter((n) => interest.indexOf(n) === -1)
+  .forEach((n, i) => slices[i % workerCount].push(n));
 
 const started = Date.now();
 const results = [];
@@ -105,6 +133,7 @@ function report() {
     const b = r.bands || [0, 0, 0, 0];
     process.stdout.write(
       `  level ${String(r.level).padStart(3)}  ` +
+        (r.banked ? 'banked  ' : 'derived ') +
         `${b[3]}/${b[2]}/${b[1]}/${b[0]}  ` +
         `best ${(r.best || 0).toFixed(1).padStart(5)}%  ` +
         `naive ${(r.naiveBest || 0).toFixed(1).padStart(5)}%  ` +
@@ -113,19 +142,39 @@ function report() {
     );
   }
 
+  const banked = results.filter((r) => r.banked).length;
   const secs = ((Date.now() - started) / 1000).toFixed(0);
   process.stdout.write(
     `\n${results.length - failed.length}/${results.length} winnable, ` +
+      `${banked}/${results.length} banked, ` +
       `${puzzles.length}/${judged.length} of the sample need a real route, ` +
       `${fun.length}/${judged.length} meet the full criterion ` +
       `(${secs}s on ${workerCount} workers)\n`
   );
 
   if (failed.length) {
-    process.stderr.write(
-      `\n${failed.length} level(s) cannot be won by their own route: ` +
-        failed.map((r) => r.level).join(', ') + '\n'
-    );
+    /*
+     * Two ways to fail, and they mean different things. A level whose own route
+     * cannot win is broken outright. A BANKED level that no longer meets the
+     * criterion means the bank has drifted from the rules — the generator
+     * measured that terrain and signed it off, so if it does not hold now,
+     * either the simulation changed under it or the file was edited by hand.
+     * Regenerate rather than lowering the bar.
+     */
+    const unwinnable = failed.filter((r) => r.route < WIN || !r.balanced);
+    const drifted = failed.filter((r) => unwinnable.indexOf(r) === -1);
+    if (unwinnable.length)
+      process.stderr.write(
+        `\n${unwinnable.length} level(s) cannot be won by their own route: ` +
+          unwinnable.map((r) => r.level).join(', ') + '\n'
+      );
+    if (drifted.length)
+      process.stderr.write(
+        `\n${drifted.length} banked level(s) no longer meet the criterion they were ` +
+          'banked against: ' +
+          drifted.map((r) => `${r.level} (${(r.reasons || []).join('; ')})`).join(', ') +
+          '\nRegenerate them: node tools/generate-levels.js <first> <last>\n'
+      );
     process.exit(1);
   }
 }

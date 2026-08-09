@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { serve, launch, watch, digDown, text, until, PHONE } = require('./helpers');
+const { serve, launch, watch, digDown, aimAt, text, until, PHONE } = require('./helpers');
 
 let ctxServer, browser, base;
 
@@ -99,7 +99,7 @@ test('dragging behind the intro does not dig, dragging after it does', async () 
   // barrier, a drag started on the title screen would silently carve a channel
   // before the player had read anything.
   const { ctx, page } = await open();
-  await digDown(page, 0.78);
+  await digDown(page, await aimAt(page, 'crystal'));
   await page.locator('#start').tap();
   await page.waitForTimeout(2500);
   assert.strictEqual(
@@ -108,7 +108,7 @@ test('dragging behind the intro does not dig, dragging after it does', async () 
     'a drag made while the intro was up should not have cut anything'
   );
 
-  await digDown(page, 0.78);
+  await digDown(page, await aimAt(page, 'crystal'));
   const flowing = await until(page, async () =>
     parseInt(await text(page, '#collected'), 10) > 0
   );
@@ -122,7 +122,7 @@ test('Menu reopens the title screen, and leaving it does not restart', async () 
   await page.waitForTimeout(200);
   // A full cut, not a shallow one: this waits on fluid actually arriving, so
   // the channel has to reach the cavern or the wait never resolves.
-  await digDown(page, 0.78);
+  await digDown(page, await aimAt(page, 'crystal'));
   assert.ok(
     await until(page, async () => parseInt(await text(page, '#collected'), 10) > 0),
     'the cut should be delivering before the menu is opened'
@@ -225,11 +225,17 @@ test('Close leaves the map without changing the level', async () => {
 // ---------------------------------------------------------------------------
 
 test('digging the clay corridor clears the level and earns a grade', async () => {
+  /*
+   * Level 1 is a teaching level: it is meant to fall to a straight drop on the
+   * crystal, which is exactly what this cuts. From level 4 up there is a roof
+   * over the crystal and the same drag would hit bedrock — that is the point of
+   * those levels, and this test would be wrong to expect otherwise.
+   */
   const { ctx, page, errors } = await open();
   await page.locator('#start').tap();
   await page.waitForTimeout(200);
 
-  await digDown(page, 0.78);
+  await digDown(page, await aimAt(page, 'crystal'));
   const won = await until(page, async () =>
     (await text(page, '#banner')).includes('CLEAR')
   );
@@ -263,14 +269,16 @@ test('missing the collector fails the level, and offers a way out', async () => 
   await page.locator('#start').tap();
   await page.waitForTimeout(200);
 
-  await digDown(page, 0.45);
+  // Straight down the drain mouth furthest from the crystal, wherever the level
+  // has put the two of them.
+  await digDown(page, await aimAt(page, 'miss'));
   const ended = await until(page, async () => {
     const b = await text(page, '#banner');
     return b.includes('UNWINNABLE') || b.includes('STUCK');
   });
   const banner = await text(page, '#banner');
   assert.ok(ended, `expected a failure, banner was: ${banner}`);
-  assert.ok(!banner.includes('CLEAR'), 'cutting through sand should not clear');
+  assert.ok(!banner.includes('CLEAR'), 'dropping the payload into a drain should not clear');
 
   const pct = parseInt(await text(page, '#collected'), 10);
   assert.ok(pct < 85, `failed run collected ${pct}%, which should be under 85`);
@@ -330,7 +338,8 @@ test('Restart level resets the level in place', async () => {
   const { ctx, page } = await open();
   await page.locator('#start').tap();
   await page.waitForTimeout(200);
-  await digDown(page, 0.78, 0.3, 0.6);
+  // A half-depth cut: this only needs something to have been dug, not a clear.
+  await digDown(page, await aimAt(page, 'crystal'), undefined, 0.6);
   await page.waitForTimeout(1500);
 
   const level = await text(page, '#seedlabel');

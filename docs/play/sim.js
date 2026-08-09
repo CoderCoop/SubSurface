@@ -869,7 +869,21 @@
     var out = {};
     for (var k in base) if (base.hasOwnProperty(k)) out[k] = base[k];
     for (var j in spec) if (spec.hasOwnProperty(j)) out[j] = spec[j];
-    if (typeof out.pick !== 'function') {
+    /*
+     * The pick stream comes off the SEED, and is rebuilt here rather than
+     * inherited from the curve.
+     *
+     * It used to be rebuilt only when the merged spec had no pick at all —
+     * which was never, because the curve copied in above always brings one. So
+     * a spec asking for a different seed still got the rib side, the pocket
+     * positions and the shelf offsets belonging to the level of that number,
+     * and the seed reached nothing but the cosmetic noise. That is most of the
+     * variety a generator has to work with, and it was quietly unreachable.
+     *
+     * With the seed equal to the level number the two formulas agree, so a spec
+     * restating the curve still builds the curve's level. A test pins that.
+     */
+    if (typeof spec.pick !== 'function') {
       var salt = (spec.seed === undefined ? spec.level || 1 : spec.seed) | 0;
       out.pick = function (n) {
         return mulberry32(Math.imul(salt, 92837111) + Math.imul(n, 689287499))();
