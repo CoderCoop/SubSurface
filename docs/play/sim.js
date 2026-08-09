@@ -802,12 +802,21 @@
       baffleReach: 0.2 + 0.16 * within(4, 40) + 0.04 * late,
 
       /*
-       * The cavern floor can tilt. A column that lands off the crystal then
-       * runs downhill instead of sitting where it fell, which turns a near
-       * miss from "most of it survives" into "all of it is going somewhere",
-       * and makes what you put in its way matter.
+       * The cavern floor can tilt: a fraction of the level's height by which
+       * the floor falls away either side of the crystal. A column that lands
+       * off the crystal then runs downhill instead of sitting where it fell,
+       * which turns a near miss from "most of it survives" into "all of it is
+       * going somewhere", and makes what you put in its way matter.
+       *
+       * It is on from the level the roof appears, and for the same reason. With
+       * a flat floor the solver's whole spread of aims scored within a point of
+       * each other — dead centre, on the lip, out on the apron, all 97% — so
+       * every level was pass-or-nothing with no middle. That is not difficulty
+       * either: 3★ meant "you got in", not "you found the line". Crowning the
+       * floor is what puts scores between the tiers, and so what makes the
+       * tiers mean anything.
        */
-      floorSlope: 0,
+      floorSlope: n >= 4 ? 0.05 + 0.025 * within(4, 40) : 0,
       /*
        * How far the lane tucks in under the last shelf before dropping.
        *
@@ -980,8 +989,38 @@
     var sealTop = band(D.sealAt),
       sandTop = band(D.sandAt),
       sandBot = band(D.sandAt + 0.14),
-      cavernTop = band(D.cavernAt),
-      floorY = band(0.94);
+      cavernTop = band(D.cavernAt);
+
+    /*
+     * The crown, and which way it is built.
+     *
+     * The crystal sits on a rise: the floor is highest at the basin and falls
+     * away to each side across the apron, so a column landing beside the basin
+     * runs downhill and away. That much is the point of it (see floorSlope).
+     * What matters here is that the rise goes UP from the outer floor rather
+     * than the outer floor going down from the crystal.
+     *
+     * Built the other way it silently destroyed the level. The floor is drawn
+     * from `floorAt(x)` down to the sealed shell at h-2, and the shell is only
+     * a few percent of the height below the crystal — so a crown of any size
+     * put `floorAt` past the bottom of the grid for every column out on the
+     * flank, the loop ran zero times, and no floor and NO DRAINS were written
+     * there at all. The cavern then had one continuous sump along its bottom
+     * that funnelled everything into the crystal, and the crown that was meant
+     * to punish a miss rewarded it: a straight drop at the far wall came home
+     * with 88%. Growing the level upward instead keeps every column inside the
+     * grid by construction, and keeps the drains their full depth.
+     *
+     * Bounded so the cavern stays a cavern — a crown tall enough to reach the
+     * roof would be a wall, and there would be nowhere for the fluid to fall.
+     */
+    var outerFloor = band(0.94);
+    var maxCrown = Math.max(0, outerFloor - cavernTop - Math.round(0.06 * h));
+    var slope = Math.min(
+      Math.max(0, Math.round((D.floorSlope || 0) * h)),
+      maxCrown
+    );
+    var floorY = outerFloor - slope;
 
     // Clay from the reservoir seal down to the cavern roof; the sand band and
     // pockets are carved back out of it below.
@@ -1082,6 +1121,27 @@
       laneHi = w - WALL - halfW - 1;
     var bandLane = Math.max(laneLo, Math.min(laneHi, Math.round(corridorC * w)));
 
+    /*
+     * How much open level a shelf has to leave beside it.
+     *
+     * This used to be the width of the whole clay corridor, on the reasoning
+     * that the lane had to fit through the gap — and that is what stopped the
+     * roof over the crystal from ever being built when the basin sat near the
+     * middle of the level. Covering a mid-level basin from either wall needs a
+     * reach of around three quarters of the width, and a corridor-wide opening
+     * left nowhere near that much; so the tuck silently did nothing, the roof
+     * was never laid, and a straight shaft dropped on the crystal met clay all
+     * the way down. Levels 4 and 13 were exactly that.
+     *
+     * What actually has to fit through the gap is a SHAFT, not the corridor.
+     * The corridor is a band of safe clay defined against the sand band, and
+     * there is no sand this high in the level — every shelf sits above the
+     * band, by the rule a few lines up. So the constraint is the dig: a stroke
+     * of radius DIG_R needs a little over its own diameter to get past without
+     * scraping bedrock either side.
+     */
+    var MIN_OPEN = Math.max(10, Math.round(0.1 * w));
+
     if (D.baffles > 0) {
       var reachW = Math.max(6, Math.round(D.baffleReach * w));
       var firstLeft = D.pick(50) < 0.5;
@@ -1110,11 +1170,21 @@
         if (D.tuck > 0 && lastOne) {
           var needLeft = bandLane + wantBasinHalf + wantApron + 3 - WALL;
           var needRight = w - WALL - (bandLane - wantBasinHalf - wantApron - 3);
-          var minOpen = 2 * halfW + 6; // the lane still has to fit past it
-          if (needLeft <= w - 2 * WALL - minOpen) {
+          var room = w - 2 * WALL - MIN_OPEN;
+          var canLeft = needLeft <= room,
+            canRight = needRight <= room;
+          /*
+           * Keep the alternation if the side it asks for can reach, so the lane
+           * still weaves; take the other side if it cannot. One of the two
+           * always can — covering the basin from the left needs the basin to be
+           * left of `room`, from the right needs it right of the mirror of
+           * that, and with MIN_OPEN sized to a dig rather than to the corridor
+           * those two ranges overlap across the whole level.
+           */
+          if (canLeft && (fromLeft || !canRight)) {
             fromLeft = true;
             reachHere = Math.max(reachW, needLeft);
-          } else if (needRight <= w - 2 * WALL - minOpen) {
+          } else if (canRight) {
             fromLeft = false;
             reachHere = Math.max(reachW, needRight);
           }
@@ -1183,8 +1253,21 @@
       if (t < 0) t = 0;
       if (t > 1) t = 1;
       var cx = Math.round(a.x + (bb.x - a.x) * t);
-      var lo = WALL + halfW,
-        hi = w - WALL - halfW - 1;
+      /*
+       * The corridor has to fit between the walls where the corridor means
+       * something — inside and below the sand band, where its width is what
+       * keeps the sand off the route. Above the band there is no sand to be
+       * clear of: the whole cross-section is clay, and the lane is a path
+       * rather than a channel with edges.
+       *
+       * Clamping to the corridor everywhere is what pinned the lane out of the
+       * outer twenty cells at every depth, so a shelf could not leave its gap
+       * near a wall and still be reachable. Which is the other half of why the
+       * roof over the crystal could not be built.
+       */
+      var wide = y < bandTop;
+      var lo = wide ? WALL + 2 : WALL + halfW,
+        hi = wide ? w - WALL - 3 : w - WALL - halfW - 1;
       laneX[y] = cx < lo ? lo : cx > hi ? hi : cx;
     }
     var corridorL = laneX[h - 3] - halfW,
@@ -1384,7 +1467,6 @@
      * makes a gravel dam worth building: a pile in the right place gives the
      * payload a lip to catch against.
      */
-    var slope = D.floorSlope | 0;
     var floorAt = function (px) {
       if (!slope) return floorY;
       var off = px < basinL ? basinL - px : px > basinR ? px - basinR : 0;
