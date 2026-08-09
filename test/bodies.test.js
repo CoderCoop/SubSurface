@@ -309,3 +309,92 @@ test('a level with no fractured rock creates no bodies', () => {
   bod.step(1 / 60);
   assert.strictEqual(bod.count(), 0);
 });
+
+// ---------------------------------------------------------------------------
+// Capping a drain with shattered rock
+// ---------------------------------------------------------------------------
+
+/*
+ * A bare rig: a floor with one drain mouth in it, and optionally a scored slab
+ * of rock hanging above the mouth. Nothing here comes from a level, because the
+ * claim under test is about the engine rather than about any terrain — no
+ * shipped level offers this move yet, and the note on the test below says why.
+ */
+function drainRig({ slab = false, over = 3 } = {}) {
+  const sim = blank(41, 40, 7);
+  const mouthL = 17,
+    mouthR = 23;
+  for (let x = 1; x < 40; x++) sim.set(x, 30, MAT.BEDROCK);
+  for (let x = mouthL; x <= mouthR; x++)
+    for (let y = 30; y < 39; y++) sim.set(x, y, MAT.DRAIN);
+
+  if (slab) {
+    sim.chunks.push({ x0: mouthL - over, y0: 22, x1: mouthR + over, y1: 26, detached: false });
+    for (let y = 22; y < 27; y++)
+      for (let x = mouthL - over; x <= mouthR + over; x++) {
+        sim.set(x, y, MAT.FRACTURED);
+        sim.chunkId[y * 41 + x] = 0;
+      }
+  }
+  return { sim, mouthL, mouthR };
+}
+
+function pour({ sim, mouthL, mouthR }, bodies, settle) {
+  for (let i = 0; i < settle; i++) {
+    bodies.step(1 / 60);
+    sim.step();
+  }
+  for (let y = 4; y < 10; y++)
+    for (let x = mouthL - 1; x <= mouthR + 1; x++) {
+      sim.set(x, y, MAT.WATER);
+      sim.released++;
+    }
+  for (let i = 0; i < 3000; i++) {
+    bodies.step(1 / 60);
+    sim.step();
+    assert.ok(sim.stats().balanced, `step ${i}: accounting broke`);
+  }
+  return sim.stats();
+}
+
+test('a slab of rock come to rest across a drain stops it taking anything', () => {
+  /*
+   * The engine already supports this and nothing exercises it: a rigid body
+   * stamps the cells under it into `sim.mask`, and `sim.get` reports a masked
+   * cell as bedrock — so every cellular rule treats a capped drain as floor
+   * without knowing rigid bodies exist.
+   *
+   * It is pinned here because it is the foundation for "plug a drain with
+   * shattered rock", which no level offers yet. Building terrain for it turned
+   * out to need a design answer this does not have: on a crowned floor,
+   * capping a drain converts fluid that was LOST into fluid that is STUCK,
+   * because the flank is downhill of the crystal and the payload cannot climb
+   * back. Measured on level 28, capping the nearest mouth took the loss from
+   * 2677 units to 1303 and the score from 7.9% to 13.9% — better, and nowhere
+   * near a pass. Whoever picks this up starts from a working primitive.
+   */
+  const open = drainRig();
+  const openStats = pour(open, new Bodies(open.sim), 0);
+  assert.strictEqual(openStats.inPlay, 0, 'an open drain should take the lot');
+  assert.strictEqual(openStats.lost, openStats.released);
+
+  const capped = drainRig({ slab: true });
+  const bodies = new Bodies(capped.sim);
+  bodies.shatterAll([0]);
+  const cappedStats = pour(capped, bodies, 1200);
+  assert.strictEqual(cappedStats.lost, 0, 'a capped drain should take nothing');
+  assert.strictEqual(cappedStats.inPlay, cappedStats.released, 'and the payload should still be there');
+});
+
+test('a cap has to over-hang the mouth, or the payload walks round it', () => {
+  // Flush cover is not cover: the two cells at each end are enough for the
+  // whole pool to find its way in, which is why the rig above pads by three.
+  const flush = drainRig({ slab: true, over: 0 });
+  const bodies = new Bodies(flush.sim);
+  bodies.shatterAll([0]);
+  const s = pour(flush, bodies, 1200);
+  assert.ok(
+    s.lost > 0,
+    'a cap flush with the mouth should leak, so the overhang in the test above means something'
+  );
+});

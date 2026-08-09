@@ -119,7 +119,8 @@
       m === 2 /* CLAY */ ||
       m === 3 /* SAND */ ||
       m === 4 /* WETSAND */ ||
-      m === 8 /* FRACTURED */
+      m === 8 /* FRACTURED */ ||
+      m === 10 /* VENT */
     );
   }
 

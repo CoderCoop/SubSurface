@@ -290,6 +290,13 @@ structural.
   a corridor-wide gap meant no mid-level basin could ever be roofed, so the
   levels that most needed a puzzle were the ones that got a straight drop. What
   has to fit through a gap is a shaft, not the corridor.
+- **A rigid body over a drain caps it, and capping is not the same as winning.**
+  The mask makes the primitive work — a chunk resting on a mouth stops it
+  taking anything at all. But the crown that makes aim matter also makes the
+  flank downhill of the crystal, so a capped drain turns *lost* into *stuck*:
+  measured on level 28, the loss fell from 2677 units to 1303 and the score
+  went from 7.9% to 13.9%. The two features are in tension, and any
+  plug-the-drain mechanic has to resolve that before it needs terrain.
 - **`levels.js` is precached by the service worker**, and `cache.addAll` rejects
   wholesale if any entry 404s. Removing the bank file means removing it from
   `SHELL` too.

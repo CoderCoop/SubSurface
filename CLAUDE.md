@@ -86,6 +86,12 @@ These are all measured, not theoretical. Each one shipped.
 - **A crowned floor must be built upward**, with the crest rising above the
   outer floor. Dropping the flanks instead pushes them past the bottom of the
   grid, the floor-drawing loop runs zero times, and the drains silently vanish.
+- **Capping a drain does not rescue a miss.** A rigid body over a drain mouth
+  genuinely stops it taking anything — that primitive works and is pinned in
+  `test/bodies.test.js`. But on a crowned floor the flank is downhill of the
+  crystal, so capping converts fluid that was *lost* into fluid that is *stuck*
+  and the score barely moves. Any "plug the drain" mechanic needs an answer to
+  that first, not more terrain.
 - **A hazard that removes fluid counts it as `lost`**, never as a new bucket.
   `released = inPlay + collected + lost + heldBySand` is asserted after every
   step of every run, and `lost` already means "removed from play and not
