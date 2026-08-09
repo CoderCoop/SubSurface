@@ -681,14 +681,34 @@ test('a spec builds a level directly, without going through a level number', () 
   const b = buildLevel({ w: 90, h: 150, seed: 4, level: 4 });
   assert.deepStrictEqual(a.geometry.route, b.geometry.route);
 
-  // And a spec may override any single dial without restating the rest.
-  const crowned = buildLevel({ w: 90, h: 150, seed: 4, spec: { level: 4, seed: 4, floorSlope: 6 } });
-  assert.strictEqual(crowned.geometry.floorSlope, 6);
-  assert.strictEqual(a.geometry.floorSlope, 0);
+  // And a spec may override any single dial without restating the rest. The
+  // crown is a fraction of the height, like every other depth dial, so the
+  // same spec builds the same shape at any resolution; the geometry reports
+  // the cell count it resolved to.
+  const crowned = buildLevel({ w: 90, h: 150, seed: 4, spec: { level: 4, seed: 4, floorSlope: 0.06 } });
+  const flat = buildLevel({ w: 90, h: 150, seed: 4, spec: { level: 4, seed: 4, floorSlope: 0 } });
+  assert.strictEqual(flat.geometry.floorSlope, 0);
+  assert.ok(crowned.geometry.floorSlope > 0, 'a crowned spec should crown the floor');
+
+  /*
+   * The crest rises above the outer floor rather than the flanks dropping
+   * below it. Built the other way the flanks fall off the bottom of the grid
+   * and take the drains with them, which is a level with no hazard in it at
+   * all — so this is pinned rather than left to read as an implementation
+   * detail.
+   */
+  assert.strictEqual(
+    crowned.geometry.floorY,
+    flat.geometry.floorY - crowned.geometry.floorSlope
+  );
+  assert.ok(
+    crowned.geometry.basinBot < crowned.h - 2,
+    'the collector must stay inside the grid'
+  );
 });
 
 test('a crowned floor actually falls away from the crystal', () => {
-  const sim = buildLevel({ w: 120, h: 200, seed: 8, spec: { level: 8, seed: 8, floorSlope: 6 } });
+  const sim = buildLevel({ w: 120, h: 200, seed: 8, spec: { level: 8, seed: 8, floorSlope: 0.03 } });
   const g = sim.geometry;
   const depthAt = (x) => {
     for (let y = g.floorY - 8; y < sim.h - 2; y++)
@@ -701,4 +721,71 @@ test('a crowned floor actually falls away from the crystal', () => {
     outside > atBasin,
     `floor beside the basin (${outside}) should sit lower than at it (${atBasin})`
   );
+});
+
+test('the crown never pushes the cavern floor off the bottom of the level', () => {
+  /*
+   * The crown used to be built downward: the crystal stayed put and the flanks
+   * dropped away beneath it. The floor is drawn from its own height down to the
+   * sealed shell a few percent below, so a crown of any real size put the
+   * flanks past the bottom of the grid — the drawing loop ran zero times, and
+   * no floor and no drains were written there at all. The cavern got one
+   * continuous sump along its bottom that funnelled everything home, so the
+   * crown meant to punish a miss rewarded it: a straight drop at the far wall
+   * came back with 88%.
+   *
+   * A missing hazard is invisible from every direction except this one, which
+   * is why it is asked for directly rather than inferred from a score.
+   */
+  for (const n of [4, 12, 25, 40, 60]) {
+    const sim = build({ w: 120, h: 200, seed: n, level: n });
+    const g = sim.geometry;
+    assert.ok(g.drains.length > 0, `level ${n} has no drains at all`);
+    for (let x = g.wall; x < sim.w - g.wall; x++) {
+      let solid = false;
+      for (let y = g.floorY; y < sim.h - 2 && !solid; y++)
+        if (sim.raw(x, y) !== MAT.EMPTY) solid = true;
+      assert.ok(solid, `level ${n}: column ${x} has no floor under it`);
+    }
+  }
+});
+
+test('no straight shaft reaches the crystal once the roof is in', () => {
+  /*
+   * The point of the tuck (spec §5): from the level the first shelf appears,
+   * the lowest one is a roof over the crystal, so the way in is round its open
+   * end and back underneath. There is no version of that which is one straight
+   * line — which is the whole difference between a level and a slope.
+   *
+   * It silently did not happen when the crystal sat near the middle of the
+   * level. The roof was only laid if it could still leave a gap as wide as the
+   * whole clay corridor beside it, and covering a mid-level basin from either
+   * wall needs about three quarters of the width; both sides failed the test,
+   * so no roof was built and a shaft dropped straight on the crystal met clay
+   * all the way down. Levels 4 and 13 were exactly that, and the solver said
+   * so — a single naive drop cleared both.
+   *
+   * Asked of every column the crystal drains from rather than of a few sample
+   * positions, and asked of the geometry rather than of a fraction of the
+   * width, because the generator moves the basin.
+   */
+  for (const n of [4, 8, 13, 19, 26, 34, 47]) {
+    const sim = build({ w: 120, h: 200, seed: n, level: n });
+    const g = sim.geometry;
+    assert.ok(g.difficulty.tuck > 0, `level ${n} should have a tuck`);
+    assert.ok(g.baffleY.length > 0, `level ${n} should have a shelf to tuck under`);
+
+    const from = Math.max(g.wall, g.basinL - g.apron);
+    const to = Math.min(sim.w - g.wall - 1, g.basinR + g.apron);
+    for (let x = from; x <= to; x++) {
+      let blocked = false;
+      for (let y = g.sealTop; y < g.floorY && !blocked; y++)
+        if (sim.raw(x, y) === MAT.BEDROCK) blocked = true;
+      assert.ok(
+        blocked,
+        `level ${n}: a straight shaft at x=${x} reaches the crystal (basin ` +
+          `${g.basinL}–${g.basinR}, apron ${g.apron}) without meeting bedrock`
+      );
+    }
+  }
 });
