@@ -86,6 +86,11 @@ These are all measured, not theoretical. Each one shipped.
 - **A crowned floor must be built upward**, with the crest rising above the
   outer floor. Dropping the flanks instead pushes them past the bottom of the
   grid, the floor-drawing loop runs zero times, and the drains silently vanish.
+- **A membrane seam is how a diagonal survives the sand band.** Grains rest on
+  one, fluid goes through it. Nothing else in the game lifts the "lane must
+  cross the band vertically" rule — measured, an unlined diagonal delivers 0%
+  and a lined one 73%. The material exists and is tested; no level places one
+  yet.
 - **Capping a drain does not rescue a miss.** A rigid body over a drain mouth
   genuinely stops it taking anything — that primitive works and is pinned in
   `test/bodies.test.js`. But on a crowned floor the flank is downhill of the

@@ -900,3 +900,96 @@ test('a level with vents still balances, and they sit on the shelf tips', () => 
     assert.ok(sim.stats().balanced, `step ${i}: accounting broke with vents in play`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Membranes — fluid down, grains never
+// ---------------------------------------------------------------------------
+
+test('fluid passes down through a membrane and nothing passes up or across', () => {
+  const sim = blank(21, 24);
+  for (let x = 1; x < 20; x++) put(sim, x, 14, MAT.MEMBRANE);
+  for (let x = 1; x < 20; x++) put(sim, x, 20, MAT.CLAY);
+  for (let y = 4; y < 8; y++) put(sim, 10, y, MAT.WATER);
+
+  run(sim, 400);
+  let below = 0;
+  for (let y = 15; y < 20; y++)
+    for (let x = 1; x < 20; x++) if (sim.raw(x, y) === MAT.WATER) below++;
+  assert.strictEqual(below, 4, 'all four units should have come through');
+  assert.ok(sim.stats().balanced);
+
+  // And nothing goes back the other way: a pool resting on top of a membrane
+  // that has solid under it stays where it is.
+  const sealed = blank(21, 24);
+  for (let x = 1; x < 20; x++) put(sealed, x, 14, MAT.MEMBRANE);
+  for (let x = 1; x < 20; x++) put(sealed, x, 15, MAT.CLAY);
+  for (let x = 6; x < 15; x++) put(sealed, x, 13, MAT.WATER);
+  run(sealed, 400);
+  let through = 0;
+  for (let y = 15; y < 24; y++)
+    for (let x = 1; x < 20; x++) if (sealed.raw(x, y) === MAT.WATER) through++;
+  assert.strictEqual(through, 0, 'a membrane over solid ground is not a hole');
+});
+
+test('grains rest on a membrane instead of falling through it', () => {
+  const sim = blank(21, 24);
+  for (let x = 1; x < 20; x++) put(sim, x, 16, MAT.MEMBRANE);
+  for (let y = 6; y < 12; y++) for (let x = 8; x < 13; x++) put(sim, x, y, MAT.SAND);
+  const grains = count(sim, MAT.SAND);
+
+  run(sim, 600);
+  assert.strictEqual(count(sim, MAT.SAND), grains, 'grains are conserved');
+  let past = 0;
+  for (let y = 17; y < 24; y++)
+    for (let x = 1; x < 20; x++) if (sim.raw(x, y) === MAT.SAND) past++;
+  assert.strictEqual(past, 0, 'not one grain should get through');
+});
+
+test('a membrane is rock: it cannot be dug', () => {
+  const sim = blank(21, 24);
+  for (let x = 8; x < 13; x++) put(sim, x, 16, MAT.MEMBRANE);
+  const before = count(sim, MAT.MEMBRANE);
+  sim.dig(10, 16, 5);
+  assert.strictEqual(count(sim, MAT.MEMBRANE), before);
+});
+
+test('a seam keeps a diagonal open through the sand band, which nothing else does', () => {
+  /*
+   * The reason the material exists, measured rather than asserted.
+   *
+   * Sand slumps into any diagonal channel and seals it. That is the hardest
+   * constraint in the level builder — it is why the lane has to cross the sand
+   * band straight down, why shelves have to stay above the band, and why every
+   * unwinnable late level turned out to be a plugged traverse. A membrane
+   * lining the floor of a traverse changes the answer: grains slide onto it and
+   * stop, and the payload goes through them.
+   *
+   * Nothing in the shipped levels offers this yet. The terrain for it — a
+   * lined chute across the band, somewhere other than the lane, so that taking
+   * it is a choice — is the next step, and this is the brief for it.
+   */
+  const traverse = (seam) => {
+    const sim = blank(61, 44, 5);
+    for (let y = 16; y < 26; y++) for (let x = 1; x < 60; x++) put(sim, x, y, MAT.SAND);
+    for (let t = 0; t < 40; t++) {
+      const x = 10 + t,
+        y = 16 + Math.floor(t / 4);
+      for (let d = -3; d <= 3; d++) if (y + d > 0 && y + d < 43) sim.set(x, y + d, MAT.EMPTY);
+      if (seam) for (let d = 4; d <= 5; d++) sim.set(x, y + d, MAT.MEMBRANE);
+    }
+    for (let x = 1; x < 60; x++) put(sim, x, 38, MAT.COLLECTOR);
+    for (let y = 3; y < 10; y++)
+      for (let x = 8; x < 16; x++) put(sim, x, y, MAT.WATER);
+    run(sim, 6000);
+    assert.ok(sim.stats().balanced);
+    return sim.stats().collectionPct;
+  };
+
+  const bare = traverse(false);
+  const lined = traverse(true);
+  assert.ok(bare < 5, `an unlined diagonal should seal; it delivered ${bare.toFixed(1)}%`);
+  assert.ok(
+    lined > 50,
+    `a lined diagonal should deliver; it managed ${lined.toFixed(1)}% against ${bare.toFixed(1)}%`
+  );
+});

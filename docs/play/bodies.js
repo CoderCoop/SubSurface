@@ -120,7 +120,8 @@
       m === 3 /* SAND */ ||
       m === 4 /* WETSAND */ ||
       m === 8 /* FRACTURED */ ||
-      m === 10 /* VENT */
+      m === 10 /* VENT */ ||
+      m === 11 /* MEMBRANE */
     );
   }
 
