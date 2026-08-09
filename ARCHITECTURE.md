@@ -53,6 +53,16 @@ Three things about it are contracts, not implementation details:
 - **Out of bounds reads as bedrock.** A level is sealed unless a drain says
   otherwise, so fluid can never fall off the edge of the grid uncounted.
 
+**Membranes (`MEMBRANE`)** pass fluid downward and stop everything else. The
+direction is not the interesting half — fluid in this simulation never climbs
+anyway — the interesting half is that *grains* rest on one. Sand slumping into a
+diagonal channel and sealing it is the hardest constraint in the level builder:
+it is why the lane crosses the sand band straight down, why shelves stay above
+the band, and why every unwinnable late level turned out to be a plugged
+traverse. A membrane lining the floor of a traverse lifts it. Measured on a bare
+rig, an unlined diagonal through a sand band delivers **0%** and a lined one
+**73%**. No shipped level offers this yet; the terrain is the next step.
+
 **Heat vents (`VENT`)** are the one hazard whose cost is measured in *time*
 rather than in ground: every other hazard punishes where you cut, and a vent
 punishes how long the payload spends beside it. They are uncuttable, they do not

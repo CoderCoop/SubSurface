@@ -45,7 +45,8 @@
     DRAIN = 7,
     FRACTURED = 8,
     GRAVEL = 9,
-    VENT = 10;
+    VENT = 10,
+    MEMBRANE = 11;
 
   var MAT = {
     EMPTY: EMPTY,
@@ -58,7 +59,8 @@
     DRAIN: DRAIN,
     FRACTURED: FRACTURED,
     GRAVEL: GRAVEL,
-    VENT: VENT
+    VENT: VENT,
+    MEMBRANE: MEMBRANE
   };
 
   var NAMES = {};
@@ -73,6 +75,7 @@
   NAMES[FRACTURED] = 'fractured rock';
   NAMES[GRAVEL] = 'gravel';
   NAMES[VENT] = 'heat vent';
+  NAMES[MEMBRANE] = 'membrane';
 
   // Earthy, muted terrain against a vibrant teal payload (spec §3.1).
   var COLORS = {};
@@ -89,6 +92,14 @@
   // Hot rock: the one thing down here that is not earth-toned, because it is
   // the one thing that costs you payload just by being near it (spec §3.1).
   COLORS[VENT] = [176, 72, 44];
+  // A pale mineral seam, cold against the vent's heat: the two things in the
+  // ground that are not simply rock, told apart at a glance.
+  COLORS[MEMBRANE] = [150, 168, 178];
+
+  // How far a fluid cell may pass through a membrane in one step. A seam is one
+  // or two cells thick in practice; the bound exists so a pathological column of
+  // membrane cannot become a free fall of arbitrary length.
+  var MEMBRANE_REACH = 3;
 
   // Deterministic PRNG: same seed means the same run, which is what makes the
   // integration tests meaningful and lets a level be replayed exactly.
@@ -243,6 +254,45 @@
       this.swap(sx, sy, tx, ty);
       return true;
     }
+    /*
+     * A membrane passes fluid DOWNWARD and nothing else (spec §2.3).
+     *
+     * The point of it is not the direction — fluid in this simulation never
+     * climbs anyway — it is what else is trying to get through. Grains rest on
+     * a membrane, because updateSand only moves into empty or fluid, so a seam
+     * lets the payload cross a sand band where the sand cannot follow it. That
+     * is the one thing the game otherwise has no answer to: sand slumps into
+     * any diagonal channel and seals it, which is why the lane has to cross the
+     * band straight down. A seam is a second way through, in a fixed place, and
+     * getting to it is the puzzle.
+     *
+     * Passing through means emerging BELOW the seam, however thick it is, so a
+     * two-cell seam is not a wall. Bounded, because an unbounded scan through a
+     * pathological column of membrane would be a way to fall an arbitrary
+     * distance in one step.
+     */
+    if (t === MEMBRANE && ty > sy) {
+      for (var k = 1; k <= MEMBRANE_REACH; k++) {
+        var u = this.get(tx, ty + k);
+        if (u === MEMBRANE) continue;
+        if (u === EMPTY) {
+          this.swap(sx, sy, tx, ty + k);
+          return true;
+        }
+        if (u === COLLECTOR) {
+          this.set(sx, sy, EMPTY);
+          this.collected++;
+          return true;
+        }
+        if (u === DRAIN) {
+          this.set(sx, sy, EMPTY);
+          this.lost++;
+          return true;
+        }
+        return false; // solid under the seam: nothing to pass into
+      }
+      return false;
+    }
     if (t === COLLECTOR) {
       this.set(sx, sy, EMPTY);
       this.collected++;
@@ -386,7 +436,16 @@
       if (at === COLLECTOR || at === DRAIN) return nx; // arriving is falling
       if (at !== EMPTY) break;
       var below = this.get(nx, y + 1);
-      if (below === EMPTY || below === COLLECTOR || below === DRAIN) return nx;
+      // A membrane counts as somewhere to fall, so the pressure gradient points
+      // at a seam the way it points at a hole. Without this a pool would sit
+      // beside the one way through its floor and never look at it.
+      if (
+        below === EMPTY ||
+        below === COLLECTOR ||
+        below === DRAIN ||
+        below === MEMBRANE
+      )
+        return nx;
       furthest = nx;
     }
     return dropsOnly ? -1 : furthest;
@@ -406,7 +465,13 @@
       var nx = x + d * k;
       if (this.get(nx, y) !== WATER) return -1;
       var below = this.get(nx, y + 1);
-      if (below === EMPTY || below === COLLECTOR || below === DRAIN) return nx;
+      if (
+        below === EMPTY ||
+        below === COLLECTOR ||
+        below === DRAIN ||
+        below === MEMBRANE
+      )
+        return nx;
     }
     return -1;
   };

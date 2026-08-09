@@ -340,6 +340,7 @@
   var SOLID = {};
   SOLID[MAT.CLAY] = SOLID[MAT.SAND] = SOLID[MAT.WETSAND] = 1;
   SOLID[MAT.BEDROCK] = SOLID[MAT.FRACTURED] = SOLID[MAT.VENT] = 1;
+  SOLID[MAT.MEMBRANE] = 1;
 
   function reset(newSeed) {
     seed = newSeed === undefined ? seed : newSeed;
