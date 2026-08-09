@@ -66,9 +66,14 @@ process.on('message', (msg) => {
         row.plan = v.plan;
         row.bands = v.bands;
         row.reasons = v.reasons;
+        row.crisp = !!v.crisp;
+        row.aces = v.aces;
         // Levels 1-3 teach the basic move and are meant to fall to a straight
         // drop, so the criterion they were banked against is a different one.
-        if (banked && n >= 4 && !v.fun) row.ok = false;
+        // From 4 up a banked level is held to the full shape: an answer that
+        // aces, few enough aces that finding it means something, a ladder
+        // underneath, and no naive drop that gets home.
+        if (banked && n >= 4 && !(v.fun && v.crisp && v.graded)) row.ok = false;
       }
     }
     out.push(row);

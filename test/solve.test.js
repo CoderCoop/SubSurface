@@ -69,11 +69,17 @@ test('a rough aim actually leaves the crystal it is aiming at', () => {
       `level ${n}: worst rough aim was ${Math.max(...aims)} cells off, but the ` +
         `crystal and its apron forgive ${forgiveness} — the probe never left the target`
     );
-    // And the gentlest one has to stay on it, or there is no gradient to
-    // measure, only a set of misses.
+    /*
+     * And the gentlest one has to keep some of the cut over the crystal.
+     * Delivery is by overlap — the pool drains wholesale through any gap its
+     * mouth reaches — so the gradient lives at the edges of overlap, and a
+     * family whose gentlest aim already misses entirely measures only misses.
+     * (There is no dead-centre aim: within the dig radius that is the same
+     * cut as the route, and it aced in lockstep with it on every probe.)
+     */
     assert.ok(
-      Math.min(...aims) < (g.basinR - g.basinL) / 2,
-      `level ${n}: even the gentlest rough aim missed the basin`
+      Math.min(...aims) < (g.basinR - g.basinL) / 2 + 4,
+      `level ${n}: even the gentlest rough aim has no overlap with the basin`
     );
   }
 });
@@ -226,4 +232,106 @@ test('the distribution is reported as a histogram over the tiers', () => {
   assert.strictEqual(v.aces, 2);
   assert.strictEqual(v.rough, 1);
   assert.deepStrictEqual(v.naiveBands, [1, 0, 0, 0]);
+});
+
+// ---------------------------------------------------------------------------
+// The second criterion: bounding the top of the distribution
+// ---------------------------------------------------------------------------
+
+test('too many aces fails crisp even when everything else passes', () => {
+  /*
+   * The regression this exists for: the first bank satisfied ace + forgiving +
+   * hard on every level and still played easy, because a median of five plans
+   * aced — 3★ meant "you found the area". The criterion has to bound the top
+   * of the distribution as well as the bottom.
+   */
+  const slope = verdict(
+    rows([
+      ['route', 98],
+      ['rough', 97.8],
+      ['rough', 97.5],
+      ['rough', 97.2],
+      ['rough', 97.1],
+      ['rough', 88],
+      ['rough', 90],
+      ['naive', 10]
+    ]),
+    1
+  );
+  assert.ok(slope.fun, 'the old clauses all pass');
+  assert.ok(!slope.crisp, 'five aces should fail crisp');
+
+  const crisp = verdict(
+    rows([
+      ['route', 98],
+      ['rough', 97.2],
+      ['rough', 93],
+      ['rough', 88],
+      ['rough', 40],
+      ['naive', 10]
+    ]),
+    1
+  );
+  assert.ok(crisp.fun && crisp.crisp && crisp.graded, crisp.reasons.join('; '));
+});
+
+test('a cliff under the ace fails graded', () => {
+  // One exact answer and nothing between it and failure is a lock with a
+  // scoreboard. The ladder is what makes partial credit real.
+  const lock = verdict(
+    rows([
+      ['route', 98],
+      ['rough', 88],
+      ['rough', 30],
+      ['rough', 5],
+      ['naive', 0]
+    ]),
+    1
+  );
+  assert.ok(!lock.graded, 'one rung is not a ladder');
+  assert.ok(lock.crisp && lock.forgiving);
+});
+
+test('a level whose answer is the dam is recognised as mechanic-required', () => {
+  const dam = verdict(
+    rows([
+      ['route', 61],
+      ['collapse', 97.5],
+      ['rough', 93],
+      ['rough', 88],
+      ['rough', 20],
+      ['naive', 15]
+    ]),
+    1
+  );
+  assert.ok(dam.mechanicRequired, 'route at 61 with a collapse ace is a dam level');
+  assert.ok(dam.fun && dam.crisp && dam.graded, dam.reasons.join('; '));
+  assert.strictEqual(dam.routePct, 61);
+
+  // A lane level with a redundant dam is NOT mechanic-required: the lane aces
+  // on its own, so the collapse is a flourish.
+  const lane = verdict(
+    rows([
+      ['route', 97.5],
+      ['collapse', 97.8],
+      ['rough', 88],
+      ['rough', 90],
+      ['naive', 10]
+    ]),
+    1
+  );
+  assert.ok(!lane.mechanicRequired);
+});
+
+test('the rough family can be built on a collapse answer', () => {
+  const sim = build(specFor(12));
+  const pre = [{ strokes: [{ x0: 10, y0: 50, x1: 30, y1: 50 }], settle: 1400 }];
+  const plans = roughPlans(sim, pre);
+  for (const p of plans) {
+    assert.strictEqual(p.cuts.length, 2, p.name + ' should carry the pre-phase');
+    assert.strictEqual(p.cuts[0], pre[0], p.name + ' should start with the undercut');
+    assert.ok(p.name.startsWith('c+'), 'collapse-based rough plans are labelled');
+  }
+  // And without a pre-phase the family is what it always was.
+  for (const p of roughPlans(sim)) assert.strictEqual(p.cuts.length, 1);
 });

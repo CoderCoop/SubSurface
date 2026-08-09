@@ -131,13 +131,22 @@ changing an existing level is fine. What is not fine is changing what a level
 *means* without re-verifying it: a banked entry carries the numbers the solver
 measured, and those numbers are a claim about terrain that has to still exist.
 
-A level is good when three things hold at once, and any two of them can be had
-by a level nobody would want to play:
+A level is good when five things hold at once — the first three bound the
+bottom of the distribution, the last two bound the top, and the first bank
+proved that bounding only the bottom ships levels where a median of five plans
+ace and 3★ means "you found the area":
 
 - **ace** — some plan reaches 3★ (97%). There is a line, and finding it pays.
 - **forgiving** — some plan lands in 85–92%. A near miss still gets home; a
   level without this is a lock, not a puzzle.
 - **hard** — every naive straight drop is under 85%.
+- **crisp** — at most 2 plans ace, so the line is special.
+- **graded** — at least two plans land between 85 and 97: a ladder, not a
+  cliff.
+
+The best find is `mechanicRequired`: the lane alone cannot reach 2★ and the
+dam-then-lane aces. The judge can only find these because a failed route is a
+fork (try the collapses) rather than a rejection — keep it that way.
 
 Levels 1–3 are the exception: they teach the basic move and are *supposed* to
 fall to a straight drop.

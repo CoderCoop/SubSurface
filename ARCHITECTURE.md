@@ -52,6 +52,14 @@ Three things about it are contracts, not implementation details:
   tests and the level bank meaningful.
 - **Out of bounds reads as bedrock.** A level is sealed unless a drain says
   otherwise, so fluid can never fall off the edge of the grid uncounted.
+- **step() skips dead rows.** Every write maintains a per-row count of live
+  material (fluid, sand, gravel, vents — everything that moves or rolls the
+  dice), and rows at zero are skipped wholesale. This is bit-identical to the
+  full scan, not approximately so: inactive cells never touch the PRNG, so the
+  random stream is unchanged, and the proof is a hash comparison of the full
+  cell buffer against the unskipped sim over thousands of steps. The seal, the
+  cavern air and the bedrock floor are dead for entire runs, so the solver and
+  CI both get the win for free.
 
 **Membranes (`MEMBRANE`)** pass fluid downward and stop everything else. The
 direction is not the interesting half — fluid in this simulation never climbs
@@ -174,12 +182,51 @@ star tiers plus three clauses:
 All three, and the level is `fun`. Two of them alone are satisfied by a level
 with exactly one answer and a cliff either side of it.
 
+`fun` bounds the bottom of the distribution and not the top, and the first bank
+proved that insufficient: it satisfied all three clauses on every level and
+still played easy, because a **median of five plans aced** — 3★ meant "you
+found the area". Two further clauses bound the top:
+
+- **crisp** — at most `CRISP_ACES` (2) plans reach 3★, so finding the line is
+  worth something *because almost nothing else aces*.
+- **graded** — at least two plans land between 85 and 97, so there is a real
+  ladder under the top rung rather than a cliff.
+
+And `mechanicRequired` marks the most valuable find: the route alone cannot
+reach 2★ but something — collapse-a-pocket-then-route — aces anyway. The
+profile used to short-circuit with "no ace: route" before trying anything
+else, which made such levels *unfindable by construction*: the judge decided
+every bankable level would be a lane level before the search ever ran.
+
+Two facts about the fluid decide where these shapes live, both measured:
+
+- **Delivery is by overlap.** The pool at the bottom of a shaft drains
+  wholesale through any gap its mouth reaches, so a cut overlapping the basin
+  at all tends to deliver everything, and the 85–92 band lives at *partial*
+  overlap — a sliver of the cut over the lip, competing with the downslope.
+  The rough family measures at those offsets (lip / graze / flank / past), and
+  deliberately has no dead-centre aim: within the dig radius that is the same
+  cut as the route, and it aced in lockstep with it on every probe.
+- **The crown's coin flip.** Fluid landing on the flank looks both ways for a
+  drop-off and picks at random, so roughly half of a near miss recovers — but
+  only while the crown's rise and the apron's run are comparable. The
+  generator samples the crown as a ratio against the apron for exactly this
+  reason; sampled independently, ten probes produced eight-ace slopes and
+  dead-route locks and nothing between.
+
 ### Two measurement details that are easy to get wrong
 
 - **Stopping and giving up are different thresholds.** `stopAt` ends a run once
   the score is banked (nothing later can un-collect it); `giveUpBelow` abandons
   it once the score is unreachable. Conflating them makes every leaking plan
   report near zero, which hides the whole 85–92 band.
+- **A caller that will reject on `crisp` anyway passes `maxAces`**, and the
+  profile bails the moment the ace budget is blown. Too many aces is the most
+  common rejection after a dead route, and it used to be the most expensive:
+  crisp was only computed at the end, so a five-ace slope still paid for the
+  whole naive family before being discarded. Measured: eight levels at 24
+  samples each in 378 seconds, where the unbailed search took 620 seconds for
+  one level at the same budget.
 - **Rejection order is chosen by rarity, then cost.** The route goes first (one
   simulation kills anything with no answer). The rough family goes second: it
   answers the rare question *and* is cheap, since its plans settle in a thousand
