@@ -49,6 +49,30 @@
     return specFor(n) || S.difficultyFor(n);
   }
 
+  /*
+   * The level's difficulty on a 1–5 scale, from what the GENERATOR measured
+   * rather than from its number: the structural load (shelves to weave
+   * between, false crossings to read, a vent taxing the descent, a clock)
+   * plus, for banked levels, what the solver saw — how badly a straight
+   * drop fails, and whether the lane alone even wins (a dam-required level
+   * is the hardest kind there is). A derived level has no measurements, so
+   * its stage stands in for them.
+   */
+  function ratingFor(n) {
+    var d = dialsFor(n);
+    var pts =
+      (d.baffles | 0) + (d.decoys | 0) + (d.vents ? 2 : 0) + (d.seconds > 0 ? 1 : 0);
+    var rep = d.report;
+    if (rep) {
+      if (rep.naiveBest < 10) pts += 2;
+      else if (rep.naiveBest < WIN_PCT) pts += 1;
+      if (rep.routePct < WIN_PCT) pts += 2;
+    } else {
+      pts += Math.min(2, (n / 15) | 0);
+    }
+    return Math.max(1, Math.min(5, Math.round(pts / 2)));
+  }
+
   var STEPS_PER_FRAME = 4;
   var STALL_FRAMES = 240; // ~4s of no change before calling a settled level over
   var DIG_RADIUS = 4; // constant, per spec §2.1
@@ -153,6 +177,10 @@
   // Elapsed play time for the level: accrues only while the level is live,
   // so it never counts the title screen or a finished run.
   var elapsed = 0, lastFrame = 0, clearTime = null;
+  // Diagnostics for experimental mode: a rolling frame-time average, and
+  // whether the intended route is being drawn over the board.
+  var fpsAvg = 0, fpsShown = 0;
+  var showRoute = false;
   /*
    * Par. A level may cap how much ground you can move and how long you have.
    * Both are optional and both are read off the level itself, so a level that
@@ -176,6 +204,9 @@
     dig: document.getElementById('digleft'),
     digtrack: document.getElementById('digtrack'),
     digbar: document.getElementById('digbar'),
+    difficulty: document.getElementById('difficulty'),
+    fps: document.getElementById('fps'),
+    fpswrap: document.getElementById('fpswrap'),
     next: document.getElementById('next'),
     intro: document.getElementById('intro')
   };
@@ -363,6 +394,13 @@
     el.banner.className = 'banner';
     el.banner.innerHTML = '';
     el.seed.textContent = 'level ' + seed;
+    if (el.difficulty) {
+      var stars5 = ratingFor(seed);
+      el.difficulty.textContent =
+        '◆◆◆◆◆'.slice(0, stars5) + '◇◇◇◇◇'.slice(0, 5 - stars5);
+    }
+    showRoute = false;
+    syncRouteBtn();
     syncNext();
     // The menu's selector follows the level actually in play, so reopening it
     // shows where you are rather than where you last pointed.
@@ -693,8 +731,33 @@
     drawParticles(sx, sy);
     drawBloom();
     drawVignette();
+    drawRoute(sx, sy);
     // The cursor sits above the grade, so the tool stays readable over glow.
     drawCursor(sx, sy);
+  }
+
+  /*
+   * The intended cut, drawn rather than dug — the look-don't-touch version
+   * of the reference cut, for studying how the answer threads the terrain
+   * without spending the level on it. Experimental mode only, toggled from
+   * the menu.
+   */
+  function drawRoute(sx, sy) {
+    if (!showRoute || !sim.geometry || !sim.geometry.route.length) return;
+    var g = sim.geometry;
+    ctx.save();
+    ctx.setLineDash([6, 6]);
+    // A slow crawl along the dash, so it reads as a path and not a crack.
+    ctx.lineDashOffset = -((tick >> 1) % 12);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(g.route[0].x * sx, (g.sealTop - 1) * sy);
+    for (var q = 0; q < g.route.length; q++)
+      ctx.lineTo(g.route[q].x * sx, g.route[q].y * sy);
+    ctx.stroke();
+    ctx.restore();
   }
 
   /*
@@ -1214,6 +1277,21 @@
     tick++;
     var dt = lastFrame ? (now - lastFrame) / 1000 : 0;
     lastFrame = now;
+    /*
+     * The FPS readout, experimental mode only. An exponential average of
+     * the real frame delta — before the backgrounded-tab cap, because the
+     * cap is a simulation-time policy and the readout's whole job is to
+     * report the truth. Written to the DOM a few times a second; per-frame
+     * writes made the number unreadable and cost layout for nothing.
+     */
+    if (el.fpswrap && !el.fpswrap.hidden && dt > 0) {
+      fpsAvg = fpsAvg ? fpsAvg * 0.95 + dt * 0.05 : dt;
+      var fpsNow = Math.round(1 / fpsAvg);
+      if ((tick & 15) === 0 && fpsNow !== fpsShown) {
+        fpsShown = fpsNow;
+        el.fps.textContent = fpsNow;
+      }
+    }
     // Cap the delta so a backgrounded tab does not bank minutes at once.
     if (dt > 0.25) dt = 0.25;
     if (!introOpen() && outcome !== 'final') elapsed += dt;
@@ -1793,6 +1871,11 @@
     if (unlockedLabel) unlockedLabel.textContent = label;
     if (levelNow) levelNow.textContent = 'Level ' + n;
     solveBtn.hidden = !experimental.checked;
+    // The diagnostics follow the mode: turning it off also turns off what
+    // it was showing, or the overlay would outlive the switch that owns it.
+    if (el.fpswrap) el.fpswrap.hidden = !experimental.checked;
+    if (!experimental.checked) showRoute = false;
+    syncRouteBtn();
     startBtn.textContent = n === seed ? 'Start digging' : 'Play level ' + n;
     drawMap();
   }
@@ -1835,6 +1918,22 @@
     // has corners in it, and a straight cut just stops at the first shelf.
     shatter(sim.digRoute(Math.max(2, Math.round(sim.w * 0.03))));
   });
+
+  var routeBtn = document.getElementById('showroute');
+  function syncRouteBtn() {
+    if (!routeBtn) return;
+    routeBtn.hidden = !experimental.checked;
+    routeBtn.textContent = (showRoute ? 'Hide' : 'Show') + ' solution overlay';
+  }
+  if (routeBtn)
+    routeBtn.addEventListener('click', function () {
+      var n = chosen();
+      if (n !== seed) reset(n);
+      showRoute = !showRoute;
+      syncRouteBtn();
+      // Looking at the overlay means looking at the board.
+      hideIntro();
+    });
 
   /*
    * A read-only handle for the browser tests.
