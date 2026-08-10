@@ -90,17 +90,15 @@ process.on('message', (msg) => {
         row.aces = v.aces;
         // Levels 1-3 teach the basic move and are meant to fall to a straight
         // drop, so the criterion they were banked against is a different one.
-        // Clay levels (4-10) are held to the full shape including the ladder;
-        // banded levels (11+) to ace + crisp + hard — their outcomes are
-        // bimodal by physics, and their difficulty is carried by the decoys,
-        // the budget and the clock instead. Mirrors accepts() in
-        // generate-worker.js; if one moves, move the other.
-        const meets =
-          n <= 3
-            ? v.winnable
-            : n <= 10
-              ? v.fun && v.crisp && v.graded
-              : v.ace && v.crisp && v.hard;
+        // Everything past them is held to ace + crisp + hard: the difficulty
+        // lives in the woven path, the decoys, the budget and the clock, and
+        // outcomes on woven terrain are bimodal — a plan threads the gaps or
+        // dies on a shelf — so the old clay-regime score ladder is recorded
+        // in the report but no longer the bar. The weave itself is gated
+        // generator-side (plausible() in generate-worker.js): it is geometry
+        // frozen in the spec, so it cannot drift and needs no re-measuring
+        // here. Mirrors accepts(); if one moves, move the other.
+        const meets = n <= 3 ? v.winnable : v.ace && v.crisp && v.hard;
         row.meets = meets;
         if (banked && n >= 4 && !meets) row.ok = false;
       }

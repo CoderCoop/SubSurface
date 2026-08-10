@@ -236,7 +236,10 @@ test('the distribution is reported as a histogram over the tiers', () => {
     1
   );
   assert.deepStrictEqual(v.bands, [1, 1, 1, 2]); // failed / 1★ / 2★ / 3★
-  assert.strictEqual(v.aces, 2);
+  // Two rows land in the top band but only ONE answer aces: the acing rough
+  // is the route with a sloppier hand, not a second answer. The histogram
+  // keeps both; the ace count does not.
+  assert.strictEqual(v.aces, 1);
   assert.strictEqual(v.rough, 1);
   assert.deepStrictEqual(v.naiveBands, [1, 0, 0, 0]);
 });
@@ -245,20 +248,27 @@ test('the distribution is reported as a histogram over the tiers', () => {
 // The second criterion: bounding the top of the distribution
 // ---------------------------------------------------------------------------
 
-test('too many aces fails crisp even when everything else passes', () => {
+test('too many ANSWERS fails crisp even when everything else passes', () => {
   /*
    * The regression this exists for: the first bank satisfied ace + forgiving +
    * hard on every level and still played easy, because a median of five plans
    * aced — 3★ meant "you found the area". The criterion has to bound the top
    * of the distribution as well as the bottom.
+   *
+   * What counts as "too many" changed when the bank went woven: an ace is a
+   * distinct ANSWER (route or collapse), because every rough plan follows
+   * the route's corners by construction — an acing graze is the same answer
+   * with a sloppier hand (measured at level 8: route, two lips and two
+   * grazes ace together while every shift and naive dies on a shelf). So a
+   * route flanked by acing roughs is crisp, and a level where the route AND
+   * several collapses all ace is not — three independent ways to the top
+   * tier is a slope with a scoreboard again.
    */
   const slope = verdict(
     rows([
       ['route', 98],
-      ['rough', 97.8],
-      ['rough', 97.5],
-      ['rough', 97.2],
-      ['rough', 97.1],
+      ['collapse', 97.8],
+      ['collapse', 97.5],
       ['rough', 88],
       ['rough', 90],
       ['naive', 10]
@@ -266,11 +276,13 @@ test('too many aces fails crisp even when everything else passes', () => {
     1
   );
   assert.ok(slope.fun, 'the old clauses all pass');
-  assert.ok(!slope.crisp, 'five aces should fail crisp');
+  assert.ok(!slope.crisp, 'three acing answers should fail crisp');
 
   const crisp = verdict(
     rows([
       ['route', 98],
+      ['rough', 97.8],
+      ['rough', 97.5],
       ['rough', 97.2],
       ['rough', 93],
       ['rough', 88],
@@ -279,7 +291,10 @@ test('too many aces fails crisp even when everything else passes', () => {
     ]),
     1
   );
-  assert.ok(crisp.fun && crisp.crisp && crisp.graded, crisp.reasons.join('; '));
+  assert.ok(
+    crisp.fun && crisp.crisp && crisp.graded,
+    'route-derived aces are one answer: ' + crisp.reasons.join('; ')
+  );
 });
 
 test('a cliff under the ace fails graded', () => {

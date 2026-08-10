@@ -4,7 +4,7 @@
  * The level generator.
  *
  *   node tools/generate-levels.js [first] [last] [--seed N] [--tries N]
- *                                 [--keep N] [--out FILE] [--fresh] [--missing]
+ *                                 [--keep N] [--out FILE] [--missing]
  *
  * `tries` bounds a level that is going badly; `keep` bounds one that is going
  * well — see search() for why those need separate budgets.
@@ -43,9 +43,18 @@ const seed = Number(flag('seed', 1));
 const tries = Number(flag('tries', 40));
 const keep = Number(flag('keep', 4));
 const out = flag('out', undefined);
-// Merge over whatever is already banked outside the range being regenerated, so
-// a run can fix one stretch of the game without discarding the rest.
-const merge = argv.indexOf('--fresh') === -1;
+/*
+ * A run ALWAYS merges over whatever is already banked. There used to be a
+ * --fresh flag that skipped the merge, on the theory that a scratch --out
+ * file should hold only the range searched — and one run with the flag and
+ * WITHOUT --out replaced the whole shipping bank with a single level. The
+ * only thing --fresh ever did beyond that was psychological (a range is
+ * re-searched whether or not it is banked unless --missing says otherwise),
+ * so the flag is gone: fixing one stretch of the game must never be able to
+ * discard the rest, whatever flags the run was started with.
+ */
+if (argv.indexOf('--fresh') !== -1)
+  process.stdout.write('--fresh is gone: runs always merge over the existing bank\n');
 // Only search levels the bank does not already have. This is what makes a
 // multi-seed top-up affordable: each pass hunts the holdouts instead of
 // re-deriving the levels a previous seed already landed.
@@ -104,7 +113,7 @@ for (const slice of slices) {
 
 function finish() {
   found.sort((a, b) => a.level - b.level);
-  const previous = merge ? load() : null;
+  const previous = load();
   const bank = {
     version: 1,
     seed,
