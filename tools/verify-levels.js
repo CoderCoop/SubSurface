@@ -50,7 +50,10 @@ const to = Number(process.argv[3] || 20);
  * gate skips them — profiling one costs the same four minutes to produce a
  * verdict nobody acts on.
  */
-const INTEREST_SAMPLES = 6;
+// Four in the in-suite gate: with the full 1-31 winnable sweep alongside, six
+// samples brushed the unit job's ten-minute timeout. The CI matrix's --full
+// shards are where every banked level gets gated; this is the fallback.
+const INTEREST_SAMPLES = 4;
 const TEACHING = 3;
 /*
  * --full gates EVERY level in range on its criterion instead of a spread.

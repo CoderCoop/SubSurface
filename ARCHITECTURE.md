@@ -317,6 +317,32 @@ drifted from the rules — regenerate rather than lower the bar. A derived level
 has never claimed to meet the criterion, and gating on one would be gating on
 the difficulty curve happening to be lucky at that number.
 
+**The CI matrix.** Level verification shards by range — `verify-levels.js
+<from> <to> --full` gates every banked level in the range — so the workflow can
+run it as parallel jobs on separate runners. The YAML the owner pastes (agents
+cannot write workflows):
+
+```yaml
+  levels:
+    name: Levels ${{ matrix.range }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        range: ['1 8', '9 16', '17 24', '25 31']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run levels:ci -- ${{ matrix.range }} --full
+```
+
+and the unit job adds `env: { SKIP_LEVELS: 1 }` so the in-suite gate stands
+down rather than paying for the same work twice. Without the matrix, the
+in-suite test (1–31, six sampled) remains the gate — the repo is safe in
+either state.
+
 **Watch the clock.** Judging by playing costs twenty-odd simulations per sampled
 level, which is the long pole in `npm test` by a wide margin — about eight
 minutes of a nine-minute suite on a four-core machine, and about five of the
