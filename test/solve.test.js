@@ -24,6 +24,7 @@ const {
   verdict,
   roughPlans,
   naivePlans,
+  decoyPlans,
   routeStrokes,
   play,
   routePlan,
@@ -84,13 +85,19 @@ test('a rough aim actually leaves the crystal it is aiming at', () => {
   }
 });
 
-test('an aim error moves the last waypoint and nothing else', () => {
+test('an aim error pivots below the band and moves only the landing', () => {
   const sim = build(specFor(12));
+  const g = sim.geometry;
   const exact = routeStrokes(sim);
   const off = routeStrokes(sim, 0, 9);
-  assert.strictEqual(exact.length, off.length);
+  // One extra stroke: the vertical thread through the crossing down to the
+  // pivot at the band's underside. Aiming through the band buries the cut.
+  assert.strictEqual(off.length, exact.length + 1);
   for (let i = 0; i < exact.length - 1; i++)
     assert.strictEqual(off[i].x0, exact[i].x0, `stroke ${i} start moved`);
+  const pivot = off[off.length - 2];
+  assert.strictEqual(pivot.x0, pivot.x1, 'the thread through the band is vertical');
+  assert.ok(pivot.y1 >= g.sandBot, 'and the pivot sits below the sand');
   assert.strictEqual(
     off[off.length - 1].x1 - exact[exact.length - 1].x1,
     9,
@@ -334,4 +341,51 @@ test('the rough family can be built on a collapse answer', () => {
   }
   // And without a pre-phase the family is what it always was.
   for (const p of roughPlans(sim)) assert.strictEqual(p.cuts.length, 1);
+});
+
+test('a decoy that works is counted against the level, not for it', () => {
+  const trap = verdict(
+    rows([
+      ['route', 98],
+      ['rough', 90],
+      ['rough', 88],
+      ['decoy', 20],
+      ['decoy', 5],
+      ['naive', 10]
+    ]),
+    1
+  );
+  assert.ok(trap.hard, 'failing decoys are what decoys are for');
+
+  const leak = verdict(
+    rows([
+      ['route', 98],
+      ['rough', 90],
+      ['rough', 88],
+      ['decoy', 97.5],
+      ['naive', 10]
+    ]),
+    1
+  );
+  assert.ok(!leak.hard, 'a working decoy is a free win in disguise');
+  assert.strictEqual(leak.decoyWins, 1);
+  // And its score is neither an ace nor a rung: wrong answers do not shape
+  // the ladder.
+  assert.strictEqual(leak.aces, 1);
+  assert.deepStrictEqual(leak.bands, [0, 2, 0, 1]);
+});
+
+test('decoy plans follow the real line to the shelves, then commit to the wrong crossing', () => {
+  const sim = build(specFor(12));
+  const g = sim.geometry;
+  const plans = decoyPlans(sim);
+  assert.strictEqual(plans.length, g.decoyAt.length);
+  assert.ok(plans.length >= 2, 'a sand level should offer at least two decoys');
+  for (let i = 0; i < plans.length; i++) {
+    const strokes = plans[i].cuts[0].strokes;
+    const last = strokes[strokes.length - 1];
+    assert.strictEqual(plans[i].kind, 'decoy');
+    assert.strictEqual(last.x1, g.decoyAt[i], 'the descent is through the decoy');
+    assert.ok(last.y1 >= g.floorY - 1, 'and it goes all the way down');
+  }
 });

@@ -832,7 +832,17 @@
       held = 0,
       deepest = -1,
       maxHead = 0;
+    /*
+     * Only the live rows. Fluid and wet sand are live materials by
+     * definition, so a dead row contributes nothing to any of these counts
+     * and skipping it returns identical numbers — this is the same
+     * bit-identity argument as the step() skip, without even the PRNG to
+     * worry about. It matters because the solver polls stats every 64 steps
+     * to watch for the win, the loss and the stall: on a full run that was a
+     * second full-grid scan hiding beside the simulation itself.
+     */
     for (var y = 0; y < this.h; y++) {
+      if (this.rowLive[y] === 0) continue;
       for (var x = 0; x < this.w; x++) {
         var i = y * this.w + x;
         var m = this.cells[i];
@@ -1034,6 +1044,13 @@
        */
       digBudget: 0,
       seconds: 0,
+      /*
+       * Decoy lanes through the sand band, from the stage that introduces the
+       * band. The band is what makes a lane legible, so the band is also what
+       * makes a FALSE lane possible — before it, there is nothing for a decoy
+       * to be a decoy of.
+       */
+      decoys: n >= 11 ? 2 : 0,
       /*
        * Gravel pockets hanging in the clay above the cavern. Cut the clay out
        * from under one and it drops, piles up on the floor, and dams it —
@@ -1556,15 +1573,71 @@
     }
 
     var hasSand = opts.sand !== false && D.sand;
+    /*
+     * The crossing through the band is a GAP, not the corridor. It used to be
+     * cut at the full corridor width — forty-odd cells, a third of the level —
+     * which had two costs: the safe thread through the sand was so wide that
+     * nothing about crossing it demanded care, and there was no room left in
+     * the band for a second crossing, so a decoy could not exist. The gap is
+     * now sized to the tool: comfortably wider than a dig stroke, narrow
+     * enough that three of them fit in a band and a careless cut nicks the
+     * sand on the way through.
+     */
+    var gapHalf = Math.min(halfW, Math.max(7, Math.round(0.055 * w)));
     if (hasSand) {
       sandBot = sandTop + Math.round(D.sandDepth * h);
       for (y = sandTop; y < sandBot; y++)
         for (x = WALL; x < w - WALL; x++)
           if (
-            (x < laneX[y] - halfW || x >= laneX[y] + halfW) &&
+            (x < laneX[y] - gapHalf || x >= laneX[y] + gapHalf) &&
             sim.get(x, y) !== BEDROCK
           )
             sim.set(x, y, SAND);
+    }
+
+    /*
+     * Decoy lanes: extra clay crossings through the sand band, identical to
+     * the real one in width and material, that do not lead anywhere good.
+     *
+     * These exist because of what the solver could never see. Its criterion
+     * judged the shape of outcomes — one exact answer, a ladder of partial
+     * credit, no free wins — and the bank finally satisfied all of it, and a
+     * human still called the levels easy. The human was right: the answer was
+     * painted on the level. One clay corridor through one sand band IS the
+     * route, visibly, and "finding the right path" takes no finding when the
+     * path is the only differently-coloured lane on the screen.
+     *
+     * With three identical crossings, the level asks a question again. Which
+     * lane sits over the crystal is readable — trace it down, mind the roof,
+     * mind the crown — but it has to be READ, and under a dig budget tight
+     * enough that a wrong commitment cannot be taken back, reading it is the
+     * game. The solver plays each decoy as a plan and the criterion requires
+     * every one of them to fail, so a decoy that quietly works never ships.
+     *
+     * Placed like the gravel pockets: in the room that exists, spaced a full
+     * lane width from the real crossing and from each other, so two crossings
+     * never merge into one wide one.
+     */
+    var decoyAt = [];
+    if (hasSand && (D.decoys | 0) > 0) {
+      var dLo = WALL + gapHalf + 1,
+        dHi = w - WALL - gapHalf - 2;
+      for (var dJ = 0; dJ < (D.decoys | 0); dJ++) {
+        var placed = -1;
+        for (var dTry = 0; dTry < 6 && placed < 0; dTry++) {
+          var cand = Math.round(dLo + (dHi - dLo) * D.pick(120 + dJ * 7 + dTry));
+          var clear = Math.abs(cand - bandLane) >= 2 * gapHalf + 8;
+          for (var dK = 0; dK < decoyAt.length && clear; dK++)
+            if (Math.abs(cand - decoyAt[dK]) < 2 * gapHalf + 6) clear = false;
+          if (clear) placed = cand;
+        }
+        if (placed < 0) continue;
+        decoyAt.push(placed);
+        for (y = sandTop; y < sandBot; y++)
+          for (x = placed - gapHalf; x < placed + gapHalf; x++)
+            if (x > WALL && x < w - WALL - 1 && sim.get(x, y) === SAND)
+              sim.set(x, y, CLAY);
+      }
     }
     // Kept for callers that predate the corridor moving; it is the near edge
     // of the sand, which is what they actually wanted.
@@ -1805,6 +1878,7 @@
       drains: drains,
       gravelAt: gravelAt,
       ventAt: ventAt,
+      decoyAt: decoyAt,
       floorSlope: slope,
       centreX: Math.round(w / 2),
       // Down the clay corridor and into the basin, wherever it has drifted to.
@@ -1819,6 +1893,7 @@
        */
       laneX: laneX,
       laneHalf: halfW,
+      gapHalf: gapHalf,
       route: (function () {
         var pts = [];
         for (var q = 1; q < lane.length - 1; q++)

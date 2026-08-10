@@ -192,6 +192,20 @@ found the area". Two further clauses bound the top:
 - **graded** — at least two plans land between 85 and 97, so there is a real
   ladder under the top rung rather than a cliff.
 
+The criterion's blind spot, found the hard way: a bank can satisfy every
+clause and still play easy, because the solver judges *outcome shapes* and a
+human experiences *finding the answer* — and the answer was painted on the
+level. One clay corridor through one sand band IS the route, visibly. The fix
+is terrain, not more solver strictness: from level 11 the band carries **decoy
+crossings**, identical in width and material to the real one, and the crossing
+gap is sized to the dig stroke rather than to the corridor so several fit.
+Which crossing sits over the crystal must be *read*. The solver plays every
+decoy as a plan (`decoyPlans`) and the `hard` clause counts a passing decoy
+like a passing naive drop, so a decoy that quietly works never ships. The dig
+budget is banked at 1.15× the dearest passing plan — a wrong commitment cannot
+be taken back — and `seconds` is armed from the slowest passing plan's
+measured flow time, so reading the level is done under a clock.
+
 And `mechanicRequired` marks the most valuable find: the route alone cannot
 reach 2★ but something — collapse-a-pocket-then-route — aces anyway. The
 profile used to short-circuit with "no ace: route" before trying anything

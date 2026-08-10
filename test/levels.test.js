@@ -33,7 +33,7 @@ const { spawnSync } = require('node:child_process');
 test('every level can be won by its own route', { timeout: 600000 }, () => {
   const r = spawnSync(
     process.execPath,
-    [path.join(__dirname, '..', 'tools', 'verify-levels.js'), '1', '16'],
+    [path.join(__dirname, '..', 'tools', 'verify-levels.js'), '1', '31'],
     { encoding: 'utf8' }
   );
   // Printed whatever happens: the distribution is the number worth watching

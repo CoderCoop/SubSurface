@@ -227,8 +227,10 @@ function routePlan(sim) {
  * clamped inside the walls, so a large error becomes a plan that hugs the wall
  * rather than a plan that digs outside the level.
  */
-function routeStrokes(sim, shift, aim) {
+function routeStrokes(sim, shift, aim, opts) {
   const g = sim.geometry;
+  const through = !!(opts && opts.through); // aim as one diagonal through the band
+  const correct = !!(opts && opts.correct); // shifted line, but the landing corrected
   const lo = g.wall + 1,
     hi = sim.w - g.wall - 2;
   const clamp = (x) => (x < lo ? lo : x > hi ? hi : x);
@@ -237,7 +239,28 @@ function routeStrokes(sim, shift, aim) {
     py = g.sealTop - 1;
   for (let i = 0; i < g.route.length; i++) {
     const last = i === g.route.length - 1;
-    const x = clamp(g.route[i].x + (shift || 0) + (last ? aim || 0 : 0));
+    if (last && aim && !through) {
+      /*
+       * An aim error happens BELOW the sand band, not through it.
+       *
+       * The aimed final leg used to be one diagonal from the top of the band
+       * to the offset landing. Through the old corridor-width crossing that
+       * diagonal stayed in clay; through the stroke-width crossing it exits
+       * into the sand a few rows down, the sand slumps into the cut, and the
+       * plan measures burial rather than aim — the probe showed whole rough
+       * families scoring [9 failed, 2 aces] with nothing between, which is a
+       * lock, not a ladder. No player aims like that: you thread the crossing
+       * vertically, then steer in the open clay underneath. So the aimed leg
+       * pivots at the band's underside and carries the whole error from
+       * there.
+       */
+      const pivotY = Math.min(g.sandBot + 2, g.route[i].y - 1);
+      strokes.push({ x0: px, y0: py, x1: px, y1: pivotY });
+      py = pivotY;
+    }
+    const x = clamp(
+      g.route[i].x + (last && correct ? 0 : shift || 0) + (last ? aim || 0 : 0)
+    );
     strokes.push({ x0: px, y0: py, x1: x, y1: g.route[i].y });
     px = x;
     py = g.route[i].y;
@@ -279,6 +302,7 @@ function roughPlans(sim, pre) {
   const g = sim.geometry;
   const basin = Math.max(3, Math.round((g.basinR - g.basinL) / 2));
   const apron = Math.max(2, g.apron);
+  const banded = !!(g.difficulty && g.difficulty.sand);
   const out = [];
   const tag = pre ? 'c+' : '';
   const wrap = (strokes) => (pre || []).concat([{ strokes }]);
@@ -307,12 +331,26 @@ function roughPlans(sim, pre) {
    * with it on every probed level, consumed the crisp budget twice over, and
    * measured nothing the route had not already measured.
    */
-  const steps = [
-    ['lip', basin],
-    ['graze', basin + DIG_R - 1],
-    ['flank', basin + DIG_R + Math.max(1, Math.ceil(apron / 2))],
-    ['past', basin + DIG_R + apron + 2]
-  ];
+  /*
+   * On a banded level there is no 'lip' step. Delivery is wholesale through
+   * any overlap, so an offset within the tool's own width of the basin is the
+   * same cut as the route — it aced in lockstep with it on every probe, and
+   * counting it as a separate answer made `crisp` unreachable on exactly the
+   * basins wide enough to ace at all. The gradient starts where overlap gets
+   * marginal.
+   */
+  const steps = banded
+    ? [
+        ['graze', basin + DIG_R - 1],
+        ['flank', basin + DIG_R + Math.max(1, Math.ceil(apron / 2))],
+        ['past', basin + DIG_R + apron + 2]
+      ]
+    : [
+        ['lip', basin],
+        ['graze', basin + DIG_R - 1],
+        ['flank', basin + DIG_R + Math.max(1, Math.ceil(apron / 2))],
+        ['past', basin + DIG_R + apron + 2]
+      ];
   for (const [label, mag] of steps)
     for (const sign of [-1, 1])
       out.push({
@@ -320,16 +358,54 @@ function roughPlans(sim, pre) {
         kind: 'rough',
         cuts: wrap(routeStrokes(sim, 0, sign * mag))
       });
+
+  /*
+   * The impatient player: one diagonal from the band's top straight to the
+   * landing, rather than threading the crossing vertically first. The cut
+   * exits the crossing partway down the band and the sand takes a share —
+   * measured on one candidate the family ran 97, 62, 57, 16 by offset, which
+   * is the partial-credit gradient nothing else in a banded level produces.
+   */
+  if (banded && g.gapHalf) {
+    /*
+     * Four angles, not two. The burial gradient is steep and ASYMMETRIC —
+     * measured on one candidate, +7 died at 16% while -7 survived at 62%,
+     * because which wall the lane bends past decides which side the slumping
+     * sand seals first. Two probes straddle the window; four give each side a
+     * mild and a bold line, and the mild ones are where the 85–92 scores
+     * live when they live anywhere.
+     */
+    for (const mag of [Math.max(3, g.gapHalf - 1), g.gapHalf + 3])
+      for (const sign of [-1, 1]) {
+        const d = sign * mag;
+        out.push({
+          name: tag + 'angle' + (d > 0 ? '+' : '') + d,
+          kind: 'angle',
+          cuts: wrap(routeStrokes(sim, 0, d, { through: true }))
+        });
+      }
+  }
   /*
    * And the same error made higher up: the player who took the whole line
    * across a shelf slightly wrong rather than fumbling only the last drop.
    */
+  /*
+   * Shifts are capped to what still threads the band crossing. With the gap
+   * sized to the dig stroke, a whole-line misread larger than the gap buries
+   * itself in sand with certainty — that outcome is real, but it is what the
+   * decoy plans already measure. The shift probes the sloppy-but-sane player,
+   * and sane stops at the crossing wall.
+   */
+  const maxShift = banded && g.gapHalf ? Math.max(2, g.gapHalf - 2) : basin + Math.round(apron / 2);
   for (const sign of [-1, 1]) {
-    const d = sign * (basin + Math.round(apron / 2));
+    const d = sign * Math.min(maxShift, basin + Math.round(apron / 2));
     out.push({
       name: tag + 'shift' + (d > 0 ? '+' : '') + d,
       kind: 'rough',
-      cuts: wrap(routeStrokes(sim, d, 0))
+      // On a banded level the shifted player still aims the last leg at the
+      // crystal — the misread costs the sand the off-centre thread nicks, not
+      // a landing error nobody would actually make.
+      cuts: wrap(routeStrokes(sim, d, 0, { correct: banded }))
     });
   }
   return out;
@@ -384,6 +460,36 @@ function collapsePlans(sim) {
     });
   }
   return out;
+}
+
+/*
+ * The tempting wrong answers: for each decoy lane, the plan a player who fell
+ * for it would cut — the real route's line as far as the last shelf, then
+ * across to the decoy crossing and straight down through it.
+ *
+ * These exist because the levels grew decoy crossings, and a decoy that
+ * quietly works is not a decoy: it is a second answer wearing a disguise, and
+ * the level teaches the player that reading the terrain does not matter. So
+ * every decoy is played, and the criterion counts a passing decoy the same
+ * way it counts a passing naive drop — as proof the level is not hard.
+ */
+function decoyPlans(sim) {
+  const g = sim.geometry;
+  if (!g.decoyAt || !g.decoyAt.length) return [];
+  const upper = g.route.filter((p) => p.y < g.sandTop - 2);
+  return g.decoyAt.map((dx) => {
+    const strokes = [];
+    let px = g.route[0].x,
+      py = g.sealTop - 1;
+    for (const p of upper) {
+      strokes.push({ x0: px, y0: py, x1: p.x, y1: p.y });
+      px = p.x;
+      py = p.y;
+    }
+    strokes.push({ x0: px, y0: py, x1: dx, y1: g.sandTop - 2 });
+    strokes.push({ x0: dx, y0: g.sandTop - 2, x1: dx, y1: g.floorY - 1 });
+    return { name: 'decoy@' + dx, kind: 'decoy', cuts: [{ strokes }] };
+  });
 }
 
 /*
@@ -601,7 +707,17 @@ function profile(spec, opts = {}) {
   }
   if (!full && roughs < minRough) return verdict(rows, minRough, 'nothing passes roughly');
 
-  // 4. Is it obvious?
+  // 4. Do the tempting wrong answers actually fail? A decoy is cheaper to
+  // play than a naive drop — the crown throws its payload to the drains and
+  // the run bails — and a passing one is the strongest possible rejection:
+  // the level's whole premise is that the lanes have to be read.
+  for (const p of decoyPlans(probe)) {
+    const r = run(p);
+    if (broke) return { error: 'conservation broke on ' + broke, rows };
+    if (!full && r.band > 0) return verdict(rows, minRough, p.name + ' works — not a decoy');
+  }
+
+  // 5. Is it obvious?
   for (const p of naivePlans(probe)) {
     const r = run(p);
     if (broke) return { error: 'conservation broke on ' + broke, rows };
@@ -609,7 +725,7 @@ function profile(spec, opts = {}) {
   }
 
   /*
-   * 5. Any collapse plans not already run in step 2 — on a lane level they are
+   * 6. Any collapse plans not already run in step 2 — on a lane level they are
    * still worth recording, because a dam that ALSO works is part of the
    * level's true distribution. Most expensive family, so it goes last and only
    * a spec that survived everything else pays for it.
@@ -626,14 +742,25 @@ function profile(spec, opts = {}) {
 
 function verdict(rows, minRough, bailedBecause, baseName) {
   const naive = rows.filter((r) => r.kind === 'naive');
-  const solved = rows.filter((r) => r.kind !== 'naive');
+  const decoys = rows.filter((r) => r.kind === 'decoy');
+  // Decoys are wrong answers by construction: their scores are neither rungs
+  // on the ladder nor aces, whatever they are. They only ever count against.
+  const solved = rows.filter((r) => r.kind !== 'naive' && r.kind !== 'decoy');
   const top = (rs) => rs.reduce((a, b) => (b.pct > a.pct ? b : a), { pct: 0, name: null, dug: 0 });
 
   const best = top(solved);
   const naiveBest = top(naive);
   const naiveWins = naive.filter((r) => r.band > 0).length;
+  const decoyWins = decoys.filter((r) => r.band > 0).length;
   const rough = solved.filter((r) => r.band === 1).length;
-  const aces = solved.filter((r) => r.band === 3).length;
+  /*
+   * Angle threads never count as aces. A mild diagonal that stays inside the
+   * crossing is the route with a wobble — burial is a threshold, so it either
+   * IS the same cut (and aces in lockstep) or it seals and dies. Its score
+   * still lands in the histogram and can be a rung; it just cannot dilute
+   * what finding the line is worth.
+   */
+  const aces = solved.filter((r) => r.band === 3 && r.kind !== 'angle').length;
   // By kind rather than by name: routePlan is the only plan of kind 'route',
   // and callers that synthesise rows (the tests) name them freely.
   const routeRow = rows.find((r) => r.kind === 'route');
@@ -648,7 +775,7 @@ function verdict(rows, minRough, bailedBecause, baseName) {
 
   const ace = aces >= 1;
   const forgiving = rough >= minRough;
-  const hard = naiveWins === 0;
+  const hard = naiveWins === 0 && decoyWins === 0;
   /*
    * The clauses the first criterion missed, and the reason a bank could pass
    * it and still play easy. The owner's words were "ONE exact answer scoring
@@ -674,7 +801,8 @@ function verdict(rows, minRough, bailedBecause, baseName) {
   if (ace && !crisp) reasons.push(aces + ' plans ace — the line is not special');
   if (!graded) reasons.push('no ladder: ' + (bands[1] + bands[2]) + ' plans between ' + WIN + ' and ' + THREE);
   if (!forgiving) reasons.push('nothing passes roughly (' + rough + ' in ' + WIN + '–' + TWO + ')');
-  if (!hard) reasons.push(naiveWins + ' naive drop(s) clear it');
+  if (naiveWins) reasons.push(naiveWins + ' naive drop(s) clear it');
+  if (decoyWins) reasons.push(decoyWins + ' decoy lane(s) actually work');
   if (bailedBecause) reasons.push('short-circuited: ' + bailedBecause);
 
   return {
@@ -693,6 +821,7 @@ function verdict(rows, minRough, bailedBecause, baseName) {
     dug: best.dug,
     naiveBest: naiveBest.pct,
     naiveWins,
+    decoyWins,
     rough,
     aces,
     bands,
@@ -737,6 +866,7 @@ module.exports = {
   play,
   build,
   naivePlans,
+  decoyPlans,
   routePlan,
   roughPlans,
   collapsePlans,

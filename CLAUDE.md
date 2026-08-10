@@ -144,6 +144,13 @@ ace and 3★ means "you found the area":
 - **graded** — at least two plans land between 85 and 97: a ladder, not a
   cliff.
 
+From level 11 the sand band carries **decoy crossings** — identical clay lanes
+that lead nowhere good. The solver plays each one and `hard` requires them all
+to fail. Budgets are banked tight (1.15× the dearest passing plan) and
+`seconds` is armed from measured flow time: the game enforces both, so a level
+is played under commitment and a clock. If you widen a budget or zero a timer
+"to be safe", you are deleting the difficulty the owner asked for.
+
 The best find is `mechanicRequired`: the lane alone cannot reach 2★ and the
 dam-then-lane aces. The judge can only find these because a failed route is a
 fork (try the collapses) rather than a rejection — keep it that way.
