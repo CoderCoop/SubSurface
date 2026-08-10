@@ -183,13 +183,24 @@ function accepts(n, p) {
   if (p.error) return false;
   if (n <= 3) return p.winnable && p.ace && p.naiveWins > 0;
   /*
-   * fun (ace + forgiving + hard) was the first criterion, and the first bank
-   * proved it insufficient: it bounds the bottom of the distribution and not
-   * the top, so levels where every offset aced sailed through and 3★ meant
-   * nothing. crisp bounds the top — at most CRISP_ACES plans ace — and graded
-   * demands a real ladder underneath, so the space between "found the line"
-   * and "missed" has scores in it rather than a cliff.
+   * Two regimes, because two different things carry the difficulty.
+   *
+   * On clay-only levels (4–10) the score ladder is measurable and required in
+   * full: ace, crisp, a graded ladder, a rough pass, no free wins. Probed and
+   * achievable.
+   *
+   * On banded levels the outcomes are bimodal by physics — wholesale drain
+   * plus threshold burial — so demanding the 85–92 rungs there rejected
+   * everything: three seeds of searching banked five levels out of
+   * twenty-one. The difficulty of a banded level does not live in the score
+   * gradient anyway; it lives in the parts the solver cannot play: choosing
+   * between identical crossings (gated: every decoy must fail), and doing it
+   * under the budget and the clock (armed from measurements, enforced by the
+   * game). So a banded level is gated on ace + crisp + hard, and the ladder
+   * clauses are recorded rather than required.
    */
+  const banded = n >= 11;
+  if (banded) return p.ace && p.crisp && p.hard;
   return p.fun && p.crisp && p.graded;
 }
 
@@ -215,6 +226,12 @@ function plausible(n, sim, digR) {
   // A gravel pocket that could not be placed makes the collapse plan a no-op,
   // so the level is not the level the spec asked for.
   if ((g.difficulty.gravel | 0) > 0 && !g.gravelAt.length) return 'gravel had nowhere to hang';
+  /*
+   * A sand level with fewer than two false lanes is not asking its question.
+   * One crossing is the old game — the answer painted on the level — and the
+   * whole point of the band now is that the crossings have to be read.
+   */
+  if ((g.difficulty.decoys | 0) > 0 && g.decoyAt.length < 2) return 'decoys had no room';
   return null;
 }
 
@@ -237,8 +254,28 @@ function search(n, seed, tries, digR, keep) {
   let skipped = 0;
   let accepted = 0;
 
+  /*
+   * Hill-climbing on near-misses. A sample that failed ONLY by an ace or a
+   * rung is telling the search where the terrain is — throwing it away and
+   * drawing fresh discards the most expensive information the search buys.
+   * When a candidate comes close, the next few samples perturb ITS dials
+   * instead of drawing new ones. Generator-side only: it changes which specs
+   * are found, never how one is judged.
+   */
+  let seedSpec = null;
+  let climbs = 0;
   for (let i = 0; i < tries && accepted < enough; i++) {
-    const spec = sample(n, rand);
+    let spec;
+    if (seedSpec && climbs > 0) {
+      climbs--;
+      spec = Object.assign({}, seedSpec);
+      for (const k of ['basin', 'apron', 'floorSlope', 'corridor'])
+        if (typeof spec[k] === 'number') spec[k] *= 0.9 + 0.2 * rand();
+      spec.seed = 1 + Math.floor(rand() * 100000);
+    } else {
+      seedSpec = null;
+      spec = sample(n, rand);
+    }
     looked++;
     if (plausible(n, S.buildLevel({ w: 120, h: 200, seed: spec.seed, spec }), digR || 4)) {
       skipped++;
@@ -259,15 +296,30 @@ function search(n, seed, tries, digR, keep) {
      * that was doing its job and kept only the ones that happened to be
      * forgiving as well. Level 3 spent all fourteen samples finding two.
      */
+    const near = (v) =>
+      !v.error &&
+      v.ace &&
+      v.reasons.length <= 2 &&
+      v.reasons.every((r) => /plans ace|ladder|passes roughly/.test(r));
     const p = profile(spec, {
       full: false,
-      minRough: n <= 3 ? 0 : 1,
+      // No rough-pass gate for the teaching levels (their criterion has no
+      // ladder) nor for banded levels (their ladder is not gated — see
+      // accepts). Only the clay levels short-circuit on it.
+      minRough: n <= 3 || n >= 11 ? 0 : 1,
       // Teaching levels are exempt from crisp, so they get no ace budget --
       // bailing early on aces would skip the naive family that their own
       // criterion depends on.
       maxAces: n <= 3 ? undefined : CRISP_ACES
     });
-    if (!accepts(n, p)) continue;
+    if (!accepts(n, p)) {
+      // Close? Spend the next few samples in this neighbourhood.
+      if (near(p) && !seedSpec) {
+        seedSpec = spec;
+        climbs = 4;
+      }
+      continue;
+    }
     accepted++;
     const q = quality(p);
     if (!best || q > best.q) best = { spec, q, report: report(p) };
@@ -288,7 +340,9 @@ function report(p) {
     base: p.base,
     // Every passing plan's cost, so the level can be given a budget that fits
     // all of them and not just the tidiest.
-    maxDug: passing.reduce((a, r) => Math.max(a, r.dug), 0)
+    maxDug: passing.reduce((a, r) => Math.max(a, r.dug), 0),
+    // And the slowest passing plan's flow time, for the countdown.
+    maxSteps: passing.reduce((a, r) => Math.max(a, r.steps), 0)
   };
 }
 

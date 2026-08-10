@@ -50,13 +50,27 @@ const to = Number(process.argv[3] || 20);
  * gate skips them — profiling one costs the same four minutes to produce a
  * verdict nobody acts on.
  */
+// Four in the in-suite gate: with the full 1-31 winnable sweep alongside, six
+// samples brushed the unit job's ten-minute timeout. The CI matrix's --full
+// shards are where every banked level gets gated; this is the fallback.
 const INTEREST_SAMPLES = 4;
 const TEACHING = 3;
+/*
+ * --full gates EVERY level in range on its criterion instead of a spread.
+ * Too expensive for one job, exactly right for a CI matrix: four shards of
+ * eight levels each gate the whole game in parallel on separate runners, in
+ * about the time one job used to spend sampling six.
+ */
+const fullGate = process.argv.includes('--full');
 const interest = [];
 {
   const first = Math.max(from, TEACHING + 1);
-  const step = Math.max(1, Math.floor((to - first) / (INTEREST_SAMPLES - 1)));
-  for (let n = first; n <= to && interest.length < INTEREST_SAMPLES; n += step) interest.push(n);
+  if (fullGate) {
+    for (let n = first; n <= to; n++) interest.push(n);
+  } else {
+    const step = Math.max(1, Math.floor((to - first) / (INTEREST_SAMPLES - 1)));
+    for (let n = first; n <= to && interest.length < INTEREST_SAMPLES; n += step) interest.push(n);
+  }
 }
 
 /*
@@ -125,7 +139,7 @@ function report() {
    * plans get — how many ace, how many scrape a pass, how many fail — so that
    * is what gets printed. See `profile` in solve.js for the criterion.
    */
-  const fun = judged.filter((r) => r.fun);
+  const fun = judged.filter((r) => r.meets);
   process.stdout.write(
     '\nsample distribution (plans by tier: ★★★ / ★★ / ★ / failed)\n'
   );
@@ -137,7 +151,7 @@ function report() {
         `${b[3]}/${b[2]}/${b[1]}/${b[0]}  ` +
         `best ${(r.best || 0).toFixed(1).padStart(5)}%  ` +
         `naive ${(r.naiveBest || 0).toFixed(1).padStart(5)}%  ` +
-        (r.fun ? 'fun' : (r.reasons || []).join('; ')) +
+        (r.meets ? 'meets its criterion' : (r.reasons || []).join('; ')) +
         '\n'
     );
   }
@@ -148,7 +162,7 @@ function report() {
     `\n${results.length - failed.length}/${results.length} winnable, ` +
       `${banked}/${results.length} banked, ` +
       `${puzzles.length}/${judged.length} of the sample need a real route, ` +
-      `${fun.length}/${judged.length} meet the full criterion ` +
+      `${fun.length}/${judged.length} meet their criterion ` +
       `(${secs}s on ${workerCount} workers)\n`
   );
 

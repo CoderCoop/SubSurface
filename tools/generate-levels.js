@@ -4,7 +4,7 @@
  * The level generator.
  *
  *   node tools/generate-levels.js [first] [last] [--seed N] [--tries N]
- *                                 [--keep N] [--out FILE] [--fresh]
+ *                                 [--keep N] [--out FILE] [--fresh] [--missing]
  *
  * `tries` bounds a level that is going badly; `keep` bounds one that is going
  * well — see search() for why those need separate budgets.
@@ -46,9 +46,20 @@ const out = flag('out', undefined);
 // Merge over whatever is already banked outside the range being regenerated, so
 // a run can fix one stretch of the game without discarding the rest.
 const merge = argv.indexOf('--fresh') === -1;
+// Only search levels the bank does not already have. This is what makes a
+// multi-seed top-up affordable: each pass hunts the holdouts instead of
+// re-deriving the levels a previous seed already landed.
+const onlyMissing = argv.indexOf('--missing') !== -1;
 
 const levels = [];
-for (let n = from; n <= to; n++) levels.push(n);
+{
+  const have = onlyMissing ? (load() || { levels: {} }).levels : {};
+  for (let n = from; n <= to; n++) if (!have[n]) levels.push(n);
+}
+if (!levels.length) {
+  process.stdout.write('nothing to do: every level in range is already banked\n');
+  process.exit(0);
+}
 
 const workerCount = Math.max(1, Math.min(os.cpus().length, levels.length));
 const slices = Array.from({ length: workerCount }, () => []);
@@ -115,14 +126,23 @@ function finish() {
     }
     const spec = plainSpec(r.best.spec);
     /*
-     * Par for the level, measured rather than guessed: every plan that got home
-     * has to fit inside it, with enough headroom that a player who takes a
-     * wider line than the solver did is not failed for tidiness. Nothing sets a
-     * time limit yet — see the heat-vent work, which is what would make one
-     * bite.
+     * Par for the level, measured rather than guessed — and TIGHT, which the
+     * first budget was not. At 1.4x a player could carve a wrong lane and
+     * still afford the right one, so committing to a reading of the level
+     * cost nothing and the decoys would be a quiz with unlimited retries. At
+     * 1.15x every measured answer still fits with slop for an unsteady hand,
+     * but a full wrong descent does not: choose the lane, then live with it.
+     *
+     * The countdown comes from the slowest passing plan's flow time (240 sim
+     * steps to the wall-clock second), doubled, plus 75 seconds of thinking
+     * and digging. Enough to read the level and cut once; not enough to
+     * excavate it experimentally.
      */
-    spec.digBudget = Math.round(r.best.report.maxDug * 1.4);
-    spec.seconds = 0;
+    spec.digBudget = Math.round(r.best.report.maxDug * 1.15);
+    spec.seconds =
+      r.level <= 3
+        ? 0
+        : 75 + Math.ceil(((r.best.report.maxSteps || 0) / 240) * 2);
     spec.report = r.best.report;
     bank.levels[r.level] = spec;
   }

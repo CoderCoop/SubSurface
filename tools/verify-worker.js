@@ -13,7 +13,7 @@
  * coordination beyond handing out the numbers.
  */
 
-const { profile, build, routePlan, play, WIN, THREE } = require('./solve.js');
+const { profile, build, routePlan, collapsePlans, play, WIN, THREE } = require('./solve.js');
 const { specFor, load } = require('./bank.js');
 
 /*
@@ -40,15 +40,35 @@ process.on('message', (msg) => {
      * above 85 — which is all it used to be, and why every level in the report
      * read as a suspiciously tidy 85-to-94.
      */
-    const r = play(spec, routePlan(build(spec)), { stopAt: THREE, giveUpBelow: WIN });
+    const probe = build(spec);
+    const r = play(spec, routePlan(probe), { stopAt: THREE, giveUpBelow: WIN });
 
     const banked = !!(BANK && BANK.levels[n]);
+    /*
+     * Winnable means the game knows an answer, not that the LANE is the
+     * answer. On a dam-required level the route fails by design — that is
+     * what makes it the most valuable kind of level in the bank — and judging
+     * it by the lane alone red-flagged exactly the levels the search worked
+     * hardest to find. If the lane cannot win, the constructive answers get
+     * their turn before the verdict.
+     */
+    let winnable = r.pct >= WIN;
+    if (!winnable) {
+      for (const p of collapsePlans(probe)) {
+        const c = play(spec, p, { stopAt: WIN, giveUpBelow: WIN });
+        if (!c.balanced) break;
+        if (c.pct >= WIN) {
+          winnable = true;
+          break;
+        }
+      }
+    }
     const row = {
       level: n,
       banked,
       route: r.pct,
       balanced: r.balanced,
-      ok: r.pct >= WIN && r.balanced
+      ok: winnable && r.balanced
     };
     // The expensive question costs an order of magnitude more than the cheap
     // one, so it is only asked of the levels the driver marked.
@@ -70,10 +90,19 @@ process.on('message', (msg) => {
         row.aces = v.aces;
         // Levels 1-3 teach the basic move and are meant to fall to a straight
         // drop, so the criterion they were banked against is a different one.
-        // From 4 up a banked level is held to the full shape: an answer that
-        // aces, few enough aces that finding it means something, a ladder
-        // underneath, and no naive drop that gets home.
-        if (banked && n >= 4 && !(v.fun && v.crisp && v.graded)) row.ok = false;
+        // Clay levels (4-10) are held to the full shape including the ladder;
+        // banded levels (11+) to ace + crisp + hard — their outcomes are
+        // bimodal by physics, and their difficulty is carried by the decoys,
+        // the budget and the clock instead. Mirrors accepts() in
+        // generate-worker.js; if one moves, move the other.
+        const meets =
+          n <= 3
+            ? v.winnable
+            : n <= 10
+              ? v.fun && v.crisp && v.graded
+              : v.ace && v.crisp && v.hard;
+        row.meets = meets;
+        if (banked && n >= 4 && !meets) row.ok = false;
       }
     }
     out.push(row);

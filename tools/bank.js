@@ -53,7 +53,7 @@ const DIALS = [
   'ribAt', 'ribReach', 'tone',
   'baffles', 'baffleReach',
   'floorSlope', 'tuck',
-  'digBudget', 'seconds', 'gravel', 'vents', 'pillar'
+  'digBudget', 'seconds', 'gravel', 'vents', 'decoys', 'pillar'
 ];
 
 // A plain, fully-specified spec — no `pick`, so the builder rebuilds it from
@@ -68,6 +68,14 @@ function plainSpec(src) {
 function load(file) {
   const p = file || BANK_PATH;
   if (!fs.existsSync(p)) return null;
+  /*
+   * Never serve a cached copy. A generator run holds this module for many
+   * minutes while other runs rewrite the bank on disk; a require-cached bank
+   * meant finish() merged over a stale snapshot and silently reverted
+   * whatever landed in between — measured once as a whole backfill undone by
+   * a top-up pass that finished later.
+   */
+  delete require.cache[require.resolve(p)];
   // eslint-disable-next-line global-require
   const bank = require(p);
   return bank && bank.levels ? bank : null;

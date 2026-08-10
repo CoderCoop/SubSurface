@@ -1037,3 +1037,47 @@ test('row-live counts stay exact through digging, collapse and flow', () => {
   }
   assert.ok(sim.stats().balanced);
 });
+
+// ---------------------------------------------------------------------------
+// Decoy lanes — the answer must be read, not seen
+// ---------------------------------------------------------------------------
+
+test('a sand level offers several identical crossings, only one of them real', () => {
+  /*
+   * The regression that motivated this: a bank whose every level passed the
+   * solver's whole criterion, and a human called them easy anyway — because
+   * one clay corridor through one sand band IS the route, visibly. Finding
+   * the right path takes no finding when the path is the only
+   * differently-coloured lane on the screen.
+   */
+  for (const n of [12, 16, 25]) {
+    const sim = build({ w: 120, h: 200, seed: n, level: n });
+    const g = sim.geometry;
+    assert.ok(g.decoyAt.length >= 2, `level ${n}: only ${g.decoyAt.length} decoys`);
+
+    const lane = g.laneX[g.sandTop];
+    const clayRun = (cx) => {
+      // The crossing at cx must be clay for the band's whole depth and the
+      // gap's whole width — indistinguishable in material from the real one.
+      for (let y = g.sandTop; y < g.sandBot; y++)
+        for (let x = cx - g.gapHalf + 1; x < cx + g.gapHalf - 1; x++) {
+          const m = sim.raw(x, y);
+          if (m !== MAT.CLAY && m !== MAT.BEDROCK) return false;
+        }
+      return true;
+    };
+    assert.ok(clayRun(lane), `level ${n}: the real crossing is not clear`);
+    for (const dx of g.decoyAt) {
+      assert.ok(clayRun(dx), `level ${n}: decoy at ${dx} is not a clean crossing`);
+      assert.ok(
+        Math.abs(dx - lane) >= 2 * g.gapHalf + 6,
+        `level ${n}: decoy at ${dx} merges with the real lane at ${lane}`
+      );
+    }
+  }
+});
+
+test('clay-only levels get no decoys — there is no band to hide a lane in', () => {
+  const sim = build({ w: 120, h: 200, seed: 6, level: 6 });
+  assert.strictEqual(sim.geometry.decoyAt.length, 0);
+});

@@ -192,6 +192,20 @@ found the area". Two further clauses bound the top:
 - **graded** — at least two plans land between 85 and 97, so there is a real
   ladder under the top rung rather than a cliff.
 
+The criterion's blind spot, found the hard way: a bank can satisfy every
+clause and still play easy, because the solver judges *outcome shapes* and a
+human experiences *finding the answer* — and the answer was painted on the
+level. One clay corridor through one sand band IS the route, visibly. The fix
+is terrain, not more solver strictness: from level 11 the band carries **decoy
+crossings**, identical in width and material to the real one, and the crossing
+gap is sized to the dig stroke rather than to the corridor so several fit.
+Which crossing sits over the crystal must be *read*. The solver plays every
+decoy as a plan (`decoyPlans`) and the `hard` clause counts a passing decoy
+like a passing naive drop, so a decoy that quietly works never ships. The dig
+budget is banked at 1.15× the dearest passing plan — a wrong commitment cannot
+be taken back — and `seconds` is armed from the slowest passing plan's
+measured flow time, so reading the level is done under a clock.
+
 And `mechanicRequired` marks the most valuable find: the route alone cannot
 reach 2★ but something — collapse-a-pocket-then-route — aces anyway. The
 profile used to short-circuit with "no ace: route" before trying anything
@@ -302,6 +316,32 @@ wrote down what it measured, so a banked level failing now means the bank has
 drifted from the rules — regenerate rather than lower the bar. A derived level
 has never claimed to meet the criterion, and gating on one would be gating on
 the difficulty curve happening to be lucky at that number.
+
+**The CI matrix.** Level verification shards by range — `verify-levels.js
+<from> <to> --full` gates every banked level in the range — so the workflow can
+run it as parallel jobs on separate runners. The YAML the owner pastes (agents
+cannot write workflows):
+
+```yaml
+  levels:
+    name: Levels ${{ matrix.range }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        range: ['1 8', '9 16', '17 24', '25 31']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run levels:ci -- ${{ matrix.range }} --full
+```
+
+and the unit job adds `env: { SKIP_LEVELS: 1 }` so the in-suite gate stands
+down rather than paying for the same work twice. Without the matrix, the
+in-suite test (1–31, six sampled) remains the gate — the repo is safe in
+either state.
 
 **Watch the clock.** Judging by playing costs twenty-odd simulations per sampled
 level, which is the long pole in `npm test` by a wide margin — about eight

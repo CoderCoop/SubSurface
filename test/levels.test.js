@@ -30,10 +30,17 @@ const { spawnSync } = require('node:child_process');
  * the criterion, and gating on one would be gating on the difficulty curve
  * happening to be lucky at that number.
  */
-test('every level can be won by its own route', { timeout: 600000 }, () => {
+/*
+ * SKIP_LEVELS=1 stands this test down. It exists for the CI matrix: when the
+ * workflow runs level verification as parallel sharded jobs (see the matrix in
+ * ARCHITECTURE.md), the unit job sets the flag so the same work is not paid
+ * for twice. With no flag — locally, or in a workflow that has no matrix —
+ * this test is the level gate, exactly as before.
+ */
+test('every level can be won by its own route', { timeout: 600000, skip: !!process.env.SKIP_LEVELS }, () => {
   const r = spawnSync(
     process.execPath,
-    [path.join(__dirname, '..', 'tools', 'verify-levels.js'), '1', '16'],
+    [path.join(__dirname, '..', 'tools', 'verify-levels.js'), '1', '31'],
     { encoding: 'utf8' }
   );
   // Printed whatever happens: the distribution is the number worth watching
