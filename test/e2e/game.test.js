@@ -351,6 +351,47 @@ test('Restart level resets the level in place', async () => {
   await ctx.close();
 });
 
+test('a level names its difficulty, from what the generator measured', async () => {
+  const { ctx, page } = await open();
+  await page.locator('#start').tap();
+  await page.waitForTimeout(200);
+  const d = await text(page, '#difficulty');
+  assert.match(d, /^[◆◇]{5}$/, 'five diamonds, filled to the rating');
+  assert.ok(d.includes('◆'), 'no level is rated zero');
+  await ctx.close();
+});
+
+test('experimental mode shows FPS and offers the solution overlay', async () => {
+  const { ctx, page, errors } = await open();
+  assert.ok(await page.locator('#fpswrap').isHidden(), 'FPS hides outside the mode');
+
+  await page.check('#experimental');
+  assert.ok(await page.locator('#fpswrap').isVisible(), 'FPS shows in the mode');
+  const overlay = page.locator('#showroute');
+  assert.ok(await overlay.isVisible(), 'the overlay is offered in the mode');
+
+  await overlay.tap();
+  await page.waitForTimeout(600);
+  assert.ok(await page.locator('#intro').isHidden(), 'looking at the overlay means looking at the board');
+  assert.strictEqual(
+    await text(page, '#collected'), '0%',
+    'the overlay draws the route without digging it'
+  );
+  const fps = await text(page, '#fps');
+  assert.match(fps, /^\d+$/, 'the FPS readout is a number once frames flow');
+
+  // The toggle reads as its next action, and turning the mode off takes the
+  // diagnostics with it.
+  await page.locator('#menu').tap();
+  await page.waitForTimeout(200);
+  assert.strictEqual(await page.locator('#showroute').textContent(), 'Hide solution overlay');
+  await page.uncheck('#experimental');
+  assert.ok(await page.locator('#fpswrap').isHidden());
+  assert.ok(await page.locator('#showroute').isHidden());
+  assert.deepStrictEqual(errors, []);
+  await ctx.close();
+});
+
 test('the dig budget is visible: a number and a bar that drains as you cut', async () => {
   const { ctx, page } = await open();
   await page.locator('#start').tap();

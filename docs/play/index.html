@@ -738,6 +738,11 @@
           <span>Held <b id="held">0</b></span>
           <span>Drained <b id="lost">0</b></span>
           <span>Chunks <b id="chunks">0</b></span>
+          <!-- What the generator measured this level to be, as a 1-5 scale.
+               Diamonds, not stars: stars are the grade you earn, and using
+               the same glyph for a promise and a result reads as a bug. -->
+          <span>Difficulty <b id="difficulty">◇◇◇◇◇</b></span>
+          <span id="fpswrap" hidden>FPS <b id="fps">–</b></span>
           <span id="seedlabel">level 1</span>
         </div>
 
@@ -823,6 +828,9 @@
             </span>
           </label>
           <button id="solve" class="wide" hidden>Show reference cut</button>
+          <!-- Draws the intended route over the board without digging it —
+               the look-don't-touch version of the reference cut. -->
+          <button id="showroute" class="wide" hidden>Show solution overlay</button>
 
           <!-- Install offer. Chromium fires beforeinstallprompt and we show a
                real button; iOS never does, so it gets the manual instruction
