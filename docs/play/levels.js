@@ -5,7 +5,7 @@
  *
  *     node tools/generate-levels.js <first> <last> [--seed N] [--tries N]
  *
- * The last run to touch this file was 1–31 at seed 119. A run
+ * The last run to touch this file was 18–18 at seed 7. A run
  * replaces only the range it is given and merges over the rest, so a bank is
  * usually the product of several — a level the search could not fill on the
  * first pass gets another go at a wider budget. The git history is the record
@@ -28,7 +28,7 @@
   'use strict';
   return {
     version: 1,
-    seed: 119,
+    seed: 7,
     // The resolution the levels were verified at. They build at any size but do
     // not behave identically across sizes, so this is a claim about where the
     // measurements hold, not a requirement.
@@ -189,6 +189,37 @@
       pillar: 0,
       report: { best: 97.53, plan: "route", naiveBest: 0, routePct: 97.53, base: "route", bands: [8,1,1,2], maxDug: 1143 }
     },
+    // 97.4% by route; best naive drop 0.0%; plans by tier 2★★★/1★★/1★/8✗
+    10: {
+      level: 10,
+      seed: 58906,
+      sand: false,
+      fractured: false,
+      corridor: 0.28944,
+      sandDepth: 0.13,
+      fracDepth: 0.08,
+      basin: 0.25732,
+      apron: 0.05353,
+      wander: 0.56676,
+      sealAt: 0.26146,
+      sandAt: 0.51899,
+      fracAt: 0.71696,
+      cavernAt: 0.84341,
+      ribAt: 0.61578,
+      ribReach: 0.37585,
+      tone: [-8,3,1],
+      baffles: 1,
+      baffleReach: 0.29129,
+      floorSlope: 0.05375,
+      tuck: 1,
+      digBudget: 1337,
+      seconds: 100,
+      gravel: 1,
+      vents: 0,
+      decoys: 0,
+      pillar: 0,
+      report: { best: 97.37, plan: "route", naiveBest: 0, routePct: 97.37, base: "route", bands: [8,1,1,2], maxDug: 1163 }
+    },
     // 97.5% by route; best naive drop 82.7%; plans by tier 2★★★/2★★/1★/7✗
     11: {
       level: 11,
@@ -313,6 +344,37 @@
       pillar: 0,
       report: { best: 97.55, plan: "collapse0+route", naiveBest: 6.3, routePct: 97.5, base: "route", bands: [11,1,0,2], maxDug: 1236 }
     },
+    // 97.3% by collapse0+route; best naive drop 1.8%; plans by tier 2★★★/3★★/0★/9✗
+    15: {
+      level: 15,
+      seed: 14859,
+      sand: true,
+      fractured: false,
+      corridor: 0.24425,
+      sandDepth: 0.14333,
+      fracDepth: 0.08,
+      basin: 0.26614,
+      apron: 0.07591,
+      wander: 0.52709,
+      sealAt: 0.28265,
+      sandAt: 0.53151,
+      fracAt: 0.6872,
+      cavernAt: 0.82842,
+      ribAt: 0.62917,
+      ribReach: 0.40756,
+      tone: [-11,-1,11],
+      baffles: 2,
+      baffleReach: 0.20156,
+      floorSlope: 0.05688,
+      tuck: 1,
+      digBudget: 1923,
+      seconds: 102,
+      gravel: 1,
+      vents: 0,
+      decoys: 2,
+      pillar: 0,
+      report: { best: 97.29, plan: "collapse0+route", naiveBest: 1.78, routePct: 97.05, base: "route", bands: [9,0,3,2], maxDug: 1672 }
+    },
     // 97.1% by route; best naive drop 81.7%; plans by tier 2★★★/0★★/2★/8✗
     16: {
       level: 16,
@@ -374,6 +436,37 @@
       decoys: 2,
       pillar: 0,
       report: { best: 97.4, plan: "collapse0+route", naiveBest: 0, routePct: 97, base: "route", bands: [9,0,3,2], maxDug: 1753 }
+    },
+    // 97.5% by route; best naive drop 0.0%; plans by tier 3★★★/1★★/0★/4✗
+    18: {
+      level: 18,
+      seed: 80137,
+      sand: true,
+      fractured: false,
+      corridor: 0.3152,
+      sandDepth: 0.15333,
+      fracDepth: 0.08,
+      basin: 0.2669,
+      apron: 0.04631,
+      wander: 0.80692,
+      sealAt: 0.25599,
+      sandAt: 0.50411,
+      fracAt: 0.71997,
+      cavernAt: 0.79992,
+      ribAt: 0.59171,
+      ribReach: 0.261,
+      tone: [-8,0,-5],
+      baffles: 3,
+      baffleReach: 0.24683,
+      floorSlope: 0.05875,
+      tuck: 1,
+      digBudget: 1970,
+      seconds: 98,
+      gravel: 1,
+      vents: 0,
+      decoys: 2,
+      pillar: 0,
+      report: { best: 97.5, plan: "route", naiveBest: 0, routePct: 97.5, base: "route", bands: [4,0,1,3], maxDug: 1713 }
     },
     // 97.1% by route; best naive drop 0.0%; plans by tier 2★★★/1★★/0★/11✗
     21: {
