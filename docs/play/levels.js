@@ -5,7 +5,7 @@
  *
  *     node tools/generate-levels.js <first> <last> [--seed N] [--tries N]
  *
- * The last run to touch this file was 31–31 at seed 181. A run
+ * The last run to touch this file was 4–10 at seed 411. A run
  * replaces only the range it is given and merges over the rest, so a bank is
  * usually the product of several — a level the search could not fill on the
  * first pass gets another go at a wider budget. The git history is the record
@@ -28,7 +28,7 @@
   'use strict';
   return {
     version: 1,
-    seed: 181,
+    seed: 411,
     // The resolution the levels were verified at. They build at any size but do
     // not behave identically across sizes, so this is a claim about where the
     // measurements hold, not a requirement.
@@ -344,67 +344,67 @@
       pillar: 0,
       report: { best: 97.19, plan: "collapse0+route", naiveBest: 0, routePct: 97.05, base: "route", bands: [8,2,0,2], maxDug: 1309 }
     },
-    // 97.5% by route; best naive drop 82.7%; plans by tier 2★★★/2★★/1★/7✗
+    // 97.3% by angle-6; best naive drop 0.0%; plans by tier 3★★★/1★★/1★/9✗
     11: {
       level: 11,
-      seed: 87967,
+      seed: 39028,
       sand: true,
       fractured: false,
-      corridor: 0.33329,
+      corridor: 0.3625,
       sandDepth: 0.13,
       fracDepth: 0.08,
-      basin: 0.18281,
-      apron: 0.02192,
-      wander: 0.58292,
-      sealAt: 0.2581,
-      sandAt: 0.46504,
-      fracAt: 0.68202,
-      cavernAt: 0.82844,
-      ribAt: 0.65413,
-      ribReach: 0.37308,
+      basin: 0.26734,
+      apron: 0.05984,
+      wander: 0.6542,
+      sealAt: 0.25451,
+      sandAt: 0.50721,
+      fracAt: 0.68687,
+      cavernAt: 0.83894,
+      ribAt: 0.58688,
+      ribReach: 0.4085,
       tone: [4,4,-6],
-      baffles: 1,
-      baffleReach: 0.28906,
+      baffles: 3,
+      baffleReach: 0.33905,
       floorSlope: 0.05437,
       tuck: 1,
-      digBudget: 1416,
+      digBudget: 2251,
+      seconds: 99,
+      gravel: 1,
+      vents: 0,
+      decoys: 2,
+      pillar: 0,
+      report: { best: 97.3, plan: "angle-6", naiveBest: 0, routePct: 97.08, base: "route", bands: [9,1,1,3], maxDug: 1957 }
+    },
+    // 97.4% by collapse0+route; best naive drop 0.0%; plans by tier 3★★★/2★★/4★/5✗
+    12: {
+      level: 12,
+      seed: 54073,
+      sand: true,
+      fractured: false,
+      corridor: 0.28188,
+      sandDepth: 0.13333,
+      fracDepth: 0.08,
+      basin: 0.31741,
+      apron: 0.0301,
+      wander: 0.5154,
+      sealAt: 0.26986,
+      sandAt: 0.51973,
+      fracAt: 0.67251,
+      cavernAt: 0.82683,
+      ribAt: 0.61709,
+      ribReach: 0.19549,
+      tone: [3,-2,-11],
+      baffles: 3,
+      baffleReach: 0.37059,
+      floorSlope: 0.055,
+      tuck: 1,
+      digBudget: 2232,
       seconds: 102,
       gravel: 1,
       vents: 0,
       decoys: 2,
       pillar: 0,
-      report: { best: 97.46, plan: "route", naiveBest: 82.71, routePct: 97.46, base: "route", bands: [7,1,2,2], maxDug: 1231 }
-    },
-    // 97.1% by route; best naive drop 2.0%; plans by tier 2★★★/0★★/3★/7✗
-    12: {
-      level: 12,
-      seed: 94907,
-      sand: true,
-      fractured: false,
-      corridor: 0.26624,
-      sandDepth: 0.13333,
-      fracDepth: 0.08,
-      basin: 0.2548,
-      apron: 0.04858,
-      wander: 0.39714,
-      sealAt: 0.28918,
-      sandAt: 0.50999,
-      fracAt: 0.67271,
-      cavernAt: 0.84963,
-      ribAt: 0.66826,
-      ribReach: 0.3956,
-      tone: [3,-2,-11],
-      baffles: 1,
-      baffleReach: 0.21517,
-      floorSlope: 0.055,
-      tuck: 1,
-      digBudget: 1416,
-      seconds: 105,
-      gravel: 1,
-      vents: 0,
-      decoys: 2,
-      pillar: 0,
-      report: { best: 97.08, plan: "route", naiveBest: 1.96, routePct: 97.08, base: "route", bands: [7,3,0,2], maxDug: 1231 }
+      report: { best: 97.37, plan: "collapse0+route", naiveBest: 0, routePct: 97.25, base: "route", bands: [5,4,2,3], maxDug: 1941 }
     },
     // 97.4% by route; best naive drop 1.1%; plans by tier 2★★★/1★★/1★/8✗
     13: {
