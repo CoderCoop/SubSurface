@@ -1132,6 +1132,26 @@
       return Math.round(f * w);
     };
 
+    /*
+     * Shape noise for the terrain's edges: a pure function of (seed,
+     * coordinate, salt), smooth along its axis, consuming nothing from the
+     * level's pick stream — so adding an undulation to one edge cannot move
+     * any other draw. Range [0, 1].
+     */
+    var shapeAnchor = function (ix, salt) {
+      var t =
+        (Math.imul((opts.seed | 0) ^ salt, 2654435761) ^ Math.imul(ix, 40503)) | 0;
+      t = Math.imul(t ^ (t >>> 15), 1 | t);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    var shapeNoise = function (px, salt, wave) {
+      var ix = Math.floor(px / wave);
+      var f = px / wave - ix;
+      var u = f * f * (3 - 2 * f);
+      return shapeAnchor(ix, salt) * (1 - u) + shapeAnchor(ix + 1, salt) * u;
+    };
+
     var x, y, i;
     /*
      * Per-cell shading noise, computed once at build so it costs nothing per
@@ -1677,9 +1697,23 @@
       fracR = Math.min(w - WALL, laneX[fracTop] + halfW + col(0.05));
     if (opts.fractured !== false && D.fractured) {
       var CH = Math.max(3, Math.round(0.035 * w)); // chunk edge, in cells
+      /*
+       * The slab is a body of rock, not a rectangle: its top and bottom
+       * undulate a couple of cells per column and its ends pinch closed,
+       * the way an intrusion actually sits in a section. The chunk grid
+       * still keys off the rectangle's origin, so pre-scoring is
+       * untouched — edge chunks are simply smaller.
+       */
+      var fracJit = function (px, salt) {
+        return Math.round(shapeNoise(px, salt, 6) * 2);
+      };
       for (y = fracTop; y < fracBot; y++)
         for (x = fracL; x < fracR; x++) {
           if (sim.get(x, y) === BEDROCK) continue; // never breach a shelf
+          var pinch = Math.min(x - fracL, fracR - 1 - x);
+          pinch = pinch < 3 ? 3 - pinch : 0;
+          if (y < fracTop + fracJit(x, 51) + pinch) continue;
+          if (y >= fracBot - fracJit(x, 53) - pinch) continue;
           sim.set(x, y, FRACTURED);
           var gx = Math.floor((x - fracL) / CH),
             gy = Math.floor((y - fracTop) / CH);
@@ -1816,8 +1850,23 @@
      * payload a lip to catch against.
      */
     var floorAt = function (px) {
-      if (!slope) return floorY;
       var off = px < basinL ? basinL - px : px > basinR ? px - basinR : 0;
+      /*
+       * Beyond the apron the floor is scenery, and scenery gets to look
+       * like rock: low mounds, a couple of cells tall. Mounds and never
+       * pits — a mound sheds a miss toward the drains the way the flat
+       * floor did, where a pit would quietly hold fluid that the ceiling
+       * arithmetic counts as still winnable. Inside the apron the floor
+       * is a mechanism (the crown IS the aim difficulty) and stays exact.
+       */
+      if (off > apron)
+        // Tapered in from the apron's edge, so no mound can stand right
+        // beside the crown and act as a dam the level never asked for.
+        return (
+          outerFloor -
+          Math.round(shapeNoise(px, 9, 9) * 2.4 * Math.min(1, (off - apron) / 6))
+        );
+      if (!slope) return floorY;
       return floorY + Math.round(slope * Math.min(1, off / Math.max(1, apron)));
     };
     for (x = WALL; x < w - WALL; x++)
@@ -1847,6 +1896,47 @@
     for (var dI = 0; dI < drains.length; dI++)
       for (x = drains[dI][0]; x <= drains[dI][1]; x++)
         for (y = floorAt(x); y < h - 2; y++) sim.set(x, y, DRAIN);
+
+    /*
+     * The walls get knuckles: single cells of bedrock jutting into the
+     * interior wherever the wall noise crests, so the level's edge reads
+     * as rock rather than as a ruled margin. One cell deep on purpose —
+     * every lane and shelf clamp keeps several cells of margin off the
+     * walls, so nothing that matters can collide with one. Laid after all
+     * the strata, or the band carving would overwrite them with sand.
+     */
+    for (y = sealTop; y < h - 2; y++) {
+      if (sim.get(WALL, y) !== DRAIN && shapeNoise(y, 31, 5) > 0.72)
+        sim.set(WALL, y, BEDROCK);
+      if (sim.get(w - WALL - 1, y) !== DRAIN && shapeNoise(y, 37, 5) > 0.72)
+        sim.set(w - WALL - 1, y, BEDROCK);
+    }
+
+    /*
+     * A bedrock pillar standing on the cavern floor at the apron's edge
+     * (D.pillar is its height as a share of the cavern; 0 — the curve's
+     * value — means none). It splits what lands: a near miss on the
+     * pillar's side meets a wall instead of the crown's coin-flip, and
+     * the ground behind it is dead. A different question than aim or
+     * weave, which is exactly why the generator samples it — see §7.2 on
+     * hazards that change the QUESTION rather than the margin.
+     */
+    var pillarAt = null;
+    if (D.pillar > 0) {
+      var pw = Math.max(2, Math.round(0.02 * w));
+      var pSide = D.pick(70) < 0.5 ? -1 : 1;
+      var px0 =
+        pSide < 0
+          ? Math.max(WALL + 1, basinL - apron - pw)
+          : Math.min(w - WALL - 1 - pw, basinR + apron + 1);
+      var pTop = Math.max(
+        cavernTop + 3,
+        Math.round(outerFloor - D.pillar * (outerFloor - cavernTop))
+      );
+      for (x = px0; x < px0 + pw; x++)
+        for (y = pTop; y < h - 2; y++) sim.set(x, y, BEDROCK);
+      pillarAt = { x0: px0, x1: px0 + pw - 1, top: pTop };
+    }
 
     // Reservoir: fluid resting on the clay seal, with headroom above it.
     var waterTop = band(0.12);
@@ -1879,6 +1969,7 @@
       gravelAt: gravelAt,
       ventAt: ventAt,
       decoyAt: decoyAt,
+      pillarAt: pillarAt,
       floorSlope: slope,
       centreX: Math.round(w / 2),
       // Down the clay corridor and into the basin, wherever it has drifted to.
