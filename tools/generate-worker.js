@@ -122,6 +122,18 @@ function sample(n, rand) {
    */
   spec.gravel = n < 8 ? 0 : rand() < 0.55 ? 1 : 2;
   /*
+   * Layout variety, from the playtest note that the deep levels blur
+   * together: the dials that most change a level's SILHOUETTE, sampled
+   * instead of inherited. Band and slab thickness move where the crossings
+   * are and how much rock the toll costs; the pillar (a bedrock column at
+   * the apron's edge, implemented in buildLevel) changes the question at
+   * the bottom of the drop on the third of levels that draw one.
+   */
+  spec.sandDepth = clamp(base.sandDepth + (rand() - 0.5) * 0.06, 0.12, 0.2);
+  if (base.fractured)
+    spec.fracDepth = clamp(base.fracDepth + (rand() - 0.5) * 0.05, 0.07, 0.13);
+  spec.pillar = n >= 18 && rand() < 0.35 ? 0.35 + 0.4 * rand() : 0;
+  /*
    * Heat vents from the band that teaches them, and never before it — like
    * sand and fractured rock, this is progression rather than shape. How MANY
    * is shape, so that is sampled: one hot shelf tip is a tax on the last
@@ -141,7 +153,9 @@ function sample(n, rand) {
    * for roughly one shelf more per stage than the curve alone.
    */
   if (base.baffles > 0) {
-    spec.baffles = base.baffles + (n >= 6 ? 1 : 0) + (rand() < 0.5 ? 1 : 0);
+    // One more than before across the board: the shelf minimum is two from
+    // stage 4 now (see plausible), so the request has to clear it.
+    spec.baffles = base.baffles + 1 + (rand() < 0.5 ? 1 : 0);
     /*
      * A shelf costs rows: the zone that holds them runs from just below the
      * seal to well above the sand band, and at the curve's strata spacing it
@@ -285,13 +299,21 @@ function plausible(n, sim, digR) {
   if (g.difficulty.fractured && g.fracTop > 0 && g.sandBot + 3 >= g.fracTop)
     return 'sand band runs into the fractured slab';
   if (n >= 4) {
-    const needShelves = n >= 11 ? 3 : n >= 6 ? 2 : 1;
+    /*
+     * The floors were raised after the owner's playtest of the first woven
+     * bank: old level 17 was named the first level that was not "super
+     * easy", and the instruction was that EVERY level should be at least
+     * that hard. Old 17 measured two shelves and ~0.8 of the width in
+     * weave, so that is the floor from stage 6, with 4–5 one notch under
+     * it as the on-ramp out of the teaching levels.
+     */
+    const needShelves = n >= 11 ? 3 : 2;
     if (g.baffleY.length < needShelves)
       return 'zone too shallow for ' + needShelves + ' shelves';
     let weave = 0;
     for (let q = 1; q < g.route.length; q++)
       weave += Math.abs(g.route[q].x - g.route[q - 1].x);
-    const needWeave = (n >= 11 ? 1.0 : n >= 6 ? 0.7 : 0.35) * sim.w;
+    const needWeave = (n >= 11 ? 1.0 : n >= 6 ? 0.8 : 0.6) * sim.w;
     if (weave < needWeave) return 'route too straight to be the difficulty';
   }
   return null;
