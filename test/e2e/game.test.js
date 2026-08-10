@@ -390,13 +390,34 @@ test('the level clock runs while playing and stops at the clear time', async () 
   );
   assert.ok(won);
 
-  // Once cleared, the clock reports time-to-clear and stops moving, even
-  // though fluid is still arriving and the grade can still climb.
+  // Level 1 is untimed, so the clock counts UP — and once cleared it reports
+  // time-to-clear and stops moving, because there time-to-clear is the score.
+  // The timed countdown is the opposite; the next test pins that.
   const at = await text(page, '#time');
   assert.match(at, /^\d+:\d\d$/);
   await page.waitForTimeout(2500);
   assert.strictEqual(await text(page, '#time'), at, 'the clear time should be fixed');
   assert.ok((await text(page, '#banner')).includes(at), 'and be reported in the banner');
+  await ctx.close();
+});
+
+test('on a timed level the countdown keeps running while fluid still flows', async () => {
+  const { ctx, page } = await open();
+  await page.check('#experimental');
+  await pickOnMap(page, 4);
+  await solveFromMenu(page);
+  const won = await until(page, async () =>
+    (await text(page, '#banner')).includes('CLEAR')
+  );
+  assert.ok(won, `the reference cut should clear level 4, banner: ${await text(page, '#banner')}`);
+
+  // The pass must not freeze the countdown: fluid still arriving is still on
+  // the clock. The run cannot settle for at least the stall window (~4s), so
+  // two samples this close are both taken while it is live.
+  const t1 = await text(page, '#time');
+  await page.waitForTimeout(1500);
+  const t2 = await text(page, '#time');
+  assert.notStrictEqual(t2, t1, 'the countdown must keep moving after the clear');
   await ctx.close();
 });
 

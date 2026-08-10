@@ -876,8 +876,14 @@
      * The clock counts down when the level sets a limit and up when it does
      * not. Same field either way: what a player wants from it is "how am I
      * doing for time", and that is a different number in the two cases.
+     *
+     * The countdown does NOT stop at the pass: fluid still moving is still
+     * on the clock, and the run is scored where it stands when the clock
+     * runs out (see checkOutcome). Elapsed stops accruing once the outcome
+     * is final, so the display freezes on its own. The untimed count-up
+     * still freezes at the clear time — there, time-to-clear IS the score.
      */
-    if (seconds > 0 && clearTime === null) {
+    if (seconds > 0) {
       var left = Math.max(0, seconds - elapsed);
       el.time.textContent = clock(left);
       el.time.className = 'v' + (left <= 10 ? ' warn' : '');
@@ -946,21 +952,37 @@
     var pct = s.collectionPct;
 
     /*
-     * Par failures. Checked before the win so a level cannot be cleared by a
-     * unit that arrives after the clock ran out — but only while the level is
-     * unpassed, because once it is cleared the run is allowed to keep
-     * climbing toward a better grade in its own time.
+     * The clock expiring ends the run whether or not the level is passed —
+     * fluid still flowing is still on the clock. What differs is the
+     * verdict: an unpassed level fails, checked before the win below so a
+     * level cannot be cleared by a unit that arrives after time; a passed
+     * one is simply scored where it stands, keeping the grade it has
+     * reached rather than losing a level it already won.
      */
-    if (!passed) {
-      if (seconds > 0 && elapsed >= seconds) {
-        outcome = 'final';
+    if (seconds > 0 && elapsed >= seconds) {
+      outcome = 'final';
+      if (passed) {
+        var held = tierFor(pct);
+        setBanner(
+          'win',
+          'FINAL ' + stars(held.stars) + ' — ' + pct.toFixed(0) + '% in ' +
+            clock(clearTime) + onwardBtn() + restartBtn()
+        );
+      } else {
         setBanner(
           'fail',
           'OUT OF TIME — ' + pct.toFixed(0) + '% collected of the ' + WIN_PCT +
             '% needed.' + restartBtn()
         );
-        return;
       }
+      return;
+    }
+    /*
+     * The dig budget only fails a level that has not passed: once it is
+     * cleared, having no ground left to cut just means the run settles out
+     * on its own.
+     */
+    if (!passed) {
       if (digBudget > 0 && dugTotal >= digBudget && s.inPlay === 0) {
         outcome = 'final';
         setBanner(
