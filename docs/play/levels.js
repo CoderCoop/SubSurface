@@ -5,7 +5,7 @@
  *
  *     node tools/generate-levels.js <first> <last> [--seed N] [--tries N]
  *
- * The last run to touch this file was 31–31 at seed 181. A run
+ * The last run to touch this file was 25–25 at seed 330. A run
  * replaces only the range it is given and merges over the rest, so a bank is
  * usually the product of several — a level the search could not fill on the
  * first pass gets another go at a wider budget. The git history is the record
@@ -28,7 +28,7 @@
   'use strict';
   return {
     version: 1,
-    seed: 181,
+    seed: 330,
     // The resolution the levels were verified at. They build at any size but do
     // not behave identically across sizes, so this is a claim about where the
     // measurements hold, not a requirement.
@@ -778,36 +778,36 @@
       pillar: 0,
       report: { best: 97.64, plan: "route", naiveBest: 8.69, routePct: 97.64, base: "route", bands: [12,0,0,2], maxDug: 1651 }
     },
-    // 98.4% by aimgraze-6; best naive drop 0.0%; plans by tier 3★★★/2★★/0★/3✗
+    // 97.0% by route; best naive drop 0.0%; plans by tier 1★★★/2★★/0★/11✗
     25: {
       level: 25,
-      seed: 75519,
+      seed: 35920,
       sand: true,
       fractured: true,
-      corridor: 0.26496,
+      corridor: 0.20706,
       sandDepth: 0.17,
       fracDepth: 0.09667,
-      basin: 0.19732,
-      apron: 0.04901,
-      wander: 0.2732,
-      sealAt: 0.30325,
-      sandAt: 0.54985,
-      fracAt: 0.66323,
-      cavernAt: 0.77552,
-      ribAt: 0.586,
-      ribReach: 0.37066,
+      basin: 0.28738,
+      apron: 0.04607,
+      wander: 0.26341,
+      sealAt: 0.26537,
+      sandAt: 0.54028,
+      fracAt: 0.75,
+      cavernAt: 0.84556,
+      ribAt: 0.63304,
+      ribReach: 0.36214,
       tone: [9,-7,-6],
-      baffles: 2,
-      baffleReach: 0.31346,
+      baffles: 3,
+      baffleReach: 0.3892,
       floorSlope: 0.06313,
       tuck: 1,
-      digBudget: 1404,
-      seconds: 113,
+      digBudget: 2340,
+      seconds: 115,
       gravel: 1,
       vents: 0,
       decoys: 2,
       pillar: 0,
-      report: { best: 98.44, plan: "aimgraze-6", naiveBest: 0, routePct: 97.42, base: "route", bands: [3,0,2,3], maxDug: 1221 }
+      report: { best: 97.01, plan: "route", naiveBest: 0, routePct: 97.01, base: "route", bands: [11,0,2,1], maxDug: 2035 }
     },
     // 97.8% by collapse1+route; best naive drop 0.0%; plans by tier 2★★★/0★★/3★/11✗
     // the lane alone manages 19.2% — the dam is the answer
