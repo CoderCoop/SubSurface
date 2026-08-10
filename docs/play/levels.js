@@ -5,7 +5,7 @@
  *
  *     node tools/generate-levels.js <first> <last> [--seed N] [--tries N]
  *
- * The last run to touch this file was 1–31 at seed 119. A run
+ * The last run to touch this file was 31–31 at seed 143. A run
  * replaces only the range it is given and merges over the rest, so a bank is
  * usually the product of several — a level the search could not fill on the
  * first pass gets another go at a wider budget. The git history is the record
@@ -28,7 +28,7 @@
   'use strict';
   return {
     version: 1,
-    seed: 119,
+    seed: 143,
     // The resolution the levels were verified at. They build at any size but do
     // not behave identically across sizes, so this is a claim about where the
     // measurements hold, not a requirement.
@@ -375,6 +375,68 @@
       pillar: 0,
       report: { best: 97.4, plan: "collapse0+route", naiveBest: 0, routePct: 97, base: "route", bands: [9,0,3,2], maxDug: 1753 }
     },
+    // 97.3% by collapse0+route; best naive drop 12.5%; plans by tier 3★★★/2★★/0★/9✗
+    19: {
+      level: 19,
+      seed: 4322,
+      sand: true,
+      fractured: false,
+      corridor: 0.29299,
+      sandDepth: 0.15667,
+      fracDepth: 0.08,
+      basin: 0.2088,
+      apron: 0.07104,
+      wander: 0.55819,
+      sealAt: 0.28029,
+      sandAt: 0.45059,
+      fracAt: 0.67674,
+      cavernAt: 0.79034,
+      ribAt: 0.66234,
+      ribReach: 0.4149,
+      tone: [11,-7,6],
+      baffles: 3,
+      baffleReach: 0.27392,
+      floorSlope: 0.05938,
+      tuck: 1,
+      digBudget: 1416,
+      seconds: 108,
+      gravel: 1,
+      vents: 0,
+      decoys: 2,
+      pillar: 0,
+      report: { best: 97.29, plan: "collapse0+route", naiveBest: 12.47, routePct: 97.23, base: "route", bands: [9,0,2,3], maxDug: 1231 }
+    },
+    // 97.1% by collapse0+route; best naive drop 74.2%; plans by tier 2★★★/3★★/0★/9✗
+    20: {
+      level: 20,
+      seed: 13966,
+      sand: true,
+      fractured: false,
+      corridor: 0.26888,
+      sandDepth: 0.16,
+      fracDepth: 0.08,
+      basin: 0.2279,
+      apron: 0.04663,
+      wander: 0.25412,
+      sealAt: 0.28203,
+      sandAt: 0.47819,
+      fracAt: 0.70629,
+      cavernAt: 0.83723,
+      ribAt: 0.6546,
+      ribReach: 0.33189,
+      tone: [-4,3,7],
+      baffles: 2,
+      baffleReach: 0.38903,
+      floorSlope: 0.06,
+      tuck: 1,
+      digBudget: 1920,
+      seconds: 105,
+      gravel: 1,
+      vents: 0,
+      decoys: 2,
+      pillar: 0,
+      report: { best: 97.09, plan: "collapse0+route", naiveBest: 74.15, routePct: 97.07, base: "route", bands: [9,0,3,2], maxDug: 1670 }
+    },
     // 97.1% by route; best naive drop 0.0%; plans by tier 2★★★/1★★/0★/11✗
     21: {
       level: 21,
@@ -498,6 +560,37 @@
       decoys: 2,
       pillar: 0,
       report: { best: 97.64, plan: "route", naiveBest: 8.69, routePct: 97.64, base: "route", bands: [12,0,0,2], maxDug: 1651 }
+    },
+    // 98.4% by aimgraze-6; best naive drop 0.0%; plans by tier 3★★★/2★★/0★/3✗
+    25: {
+      level: 25,
+      seed: 75519,
+      sand: true,
+      fractured: true,
+      corridor: 0.26496,
+      sandDepth: 0.17,
+      fracDepth: 0.09667,
+      basin: 0.19732,
+      apron: 0.04901,
+      wander: 0.2732,
+      sealAt: 0.30325,
+      sandAt: 0.54985,
+      fracAt: 0.66323,
+      cavernAt: 0.77552,
+      ribAt: 0.586,
+      ribReach: 0.37066,
+      tone: [9,-7,-6],
+      baffles: 2,
+      baffleReach: 0.31346,
+      floorSlope: 0.06313,
+      tuck: 1,
+      digBudget: 1404,
+      seconds: 113,
+      gravel: 1,
+      vents: 0,
+      decoys: 2,
+      pillar: 0,
+      report: { best: 98.44, plan: "aimgraze-6", naiveBest: 0, routePct: 97.42, base: "route", bands: [3,0,2,3], maxDug: 1221 }
     },
     // 97.8% by collapse1+route; best naive drop 0.0%; plans by tier 2★★★/0★★/3★/11✗
     // the lane alone manages 19.2% — the dam is the answer
