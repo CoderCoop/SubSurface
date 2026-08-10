@@ -378,7 +378,36 @@
    * One pass over the grid writing straight into an ImageData buffer. The
    * lighting is all single-neighbour lookups — enough to give the cross
    * section depth without costing a second pass over 24,000 cells.
+   *
+   * The ground is textured in the same pass, and everything about the
+   * texture is a pure function of the cell's coordinates: the same cell
+   * shades the same way every frame, so nothing sparkles, and none of it
+   * touches the sim — what the rules see is exactly the cell grid, however
+   * the paint dresses it up.
    * ------------------------------------------------------------------- */
+
+  // Integer hash to [0,1). Coordinates in, noise out, no state anywhere —
+  // this is what lets the texture be both random-looking and frame-stable.
+  function hash2(x, y) {
+    var h = (x * 374761393 + y * 668265263) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+
+  /*
+   * Which materials may visually bleed into each other at their boundary.
+   * Sediments only — clay and sand interleave in a real bank, so their
+   * ruler-straight meeting line is the one that most needed roughing up.
+   * Bedrock and fractured rock keep their true edges: a shelf is two cells
+   * thick, and letting the jitter reach it shredded every shelf into
+   * confetti — uncuttable geometry the player plans around has to read as
+   * exactly the shape it is. The functional cells (crystal, drains, vents,
+   * membranes) and the outline against air and fluid stay true for the
+   * same reason: the shape of a hole is the game.
+   */
+  var STRATUM = {};
+  STRATUM[MAT.CLAY] = STRATUM[MAT.SAND] = STRATUM[MAT.WETSAND] = 1;
+
   function draw(s) {
     var d = img.data,
       gd = glowImg.data,
@@ -393,14 +422,35 @@
     // One shimmer value per frame rather than per cell.
     var shimmer = 10 + Math.sin(tick * 0.05) * 10;
 
+    var gx = 0,
+      gy = 0;
     for (var i = 0; i < cells.length; i++) {
       var m = cells[i];
-      var c = COLORS[m];
+      var above = i >= w ? cells[i - w] : MAT.BEDROCK;
+      var openAbove = above === MAT.EMPTY || above === MAT.WATER;
+
+      /*
+       * The material this cell DRAWS as. Usually its own — but where two
+       * strata meet, each column borrows the other side's colour for a
+       * hashed few rows, so the ruler-straight rows the builder lays down
+       * read as deposits with fingers and lenses instead of stripes. Paint
+       * only: the sim's cell is untouched, and the jitter is small enough
+       * (±3 rows on a ~30-row band) that the strata still say where they
+       * are.
+       */
+      var md = m;
+      if (STRATUM[m]) {
+        var dy = ((hash2(gx >> 1, 9173) * 7) | 0) - 3;
+        var j = i + dy * w;
+        if (j >= 0 && j < cells.length) {
+          var ms = cells[j];
+          if (ms !== m && STRATUM[ms]) md = ms;
+        }
+      }
+      var c = COLORS[md];
       var r = c[0],
         g = c[1],
         b = c[2];
-      var above = i >= w ? cells[i - w] : MAT.BEDROCK;
-      var openAbove = above === MAT.EMPTY || above === MAT.WATER;
 
       if (m === MAT.WATER) {
         /*
@@ -424,8 +474,6 @@
         g -= h * 0.2;
         b -= h * 0.34;
 
-        var gx = i % w,
-          gy = (i / w) | 0;
         var caustic =
           Math.sin(gx * 0.29 + gy * 0.17 + tick * 0.055) *
           Math.sin(gx * 0.13 - gy * 0.23 + tick * 0.031);
@@ -450,10 +498,95 @@
         r += shimmer;
         g += shimmer;
         b += shimmer * 0.5;
+      } else if (m === MAT.EMPTY) {
+        // Barely-there grain in the open air, so a carved channel reads as
+        // rough rock walls around a void rather than as flat dead pixels.
+        var av = hash2(gx, gy) * 6 - 3;
+        r += av;
+        g += av;
+        b += av;
       } else if (SOLID[m]) {
         r += tint[i] + tone[0];
         g += tint[i] + tone[1];
         b += tint[i] + tone[2];
+
+        /*
+         * Material texture — what makes this read as a cross-section of
+         * ground rather than a diagram of one. Each stratum gets the pattern
+         * its real counterpart would section into, drawn with cell-hash
+         * noise so it is bold at this resolution rather than fussy:
+         *
+         *   bedrock    masonry. Big offset blocks with dark seams, each
+         *              block its own grey — the cartoon shorthand for
+         *              "uncuttable", and now visibly different from the
+         *              cuttable ground at a glance
+         *   clay       sedimentary partings: wavy dark hairlines a few rows
+         *              apart, the way a cut bank actually laminates
+         *   sand       grain speckle, coarse enough to sparkle dry
+         *   wet sand   the same grain, damped — wet ground is flatter
+         *   fractured  broken diagonal fissures wandering through the mass
+         */
+        if (md === MAT.BEDROCK) {
+          var brow = (gy / 5) | 0;
+          var bxo = (brow & 1) ? 4 : 0;
+          var ex = (gx + bxo) % 9,
+            ey = gy % 5;
+          if (ex === 0 || ey === 0 || (ex === 1 && ey === 1)) {
+            r -= 24;
+            g -= 24;
+            b -= 20;
+          } else {
+            var bj = hash2(((gx + bxo) / 9) | 0, brow) * 26 - 13;
+            r += bj;
+            g += bj;
+            b += bj + 3;
+          }
+        } else if (md === MAT.CLAY) {
+          /*
+           * The parting's wobble is interpolated between column anchors, not
+           * stepped per block — stepped, the lines jumped at every block
+           * edge and the whole clay mass read as brickwork, which is
+           * exactly the material it is not.
+           */
+          var band = ((gy / 7) | 0);
+          var cx = (gx / 12) | 0;
+          var ct = (gx - cx * 12) / 12;
+          var wob =
+            hash2(cx, band) * (1 - ct) * 5 + hash2(cx + 1, band) * ct * 5;
+          if ((gy + (wob | 0)) % 7 === 0) {
+            r -= 13;
+            g -= 11;
+            b -= 9;
+          } else if (hash2(gx, gy) > 0.93) {
+            r += 11;
+            g += 8;
+            b += 5;
+          }
+        } else if (md === MAT.SAND || md === MAT.WETSAND) {
+          var gr = hash2(gx, gy);
+          var amp = md === MAT.SAND ? 1 : 0.5;
+          if (gr > 0.8) {
+            r += 15 * amp;
+            g += 13 * amp;
+            b += 9 * amp;
+          } else if (gr < 0.16) {
+            r -= 14 * amp;
+            g -= 12 * amp;
+            b -= 9 * amp;
+          }
+        } else if (md === MAT.FRACTURED) {
+          var fj = (hash2(gx >> 2, gy >> 2) * 6) | 0;
+          if ((gx + gy + fj) % 8 === 0) {
+            r -= 18;
+            g -= 17;
+            b -= 15;
+          } else if (hash2(gy, gx) > 0.9) {
+            r += 9;
+            g += 9;
+            b += 10;
+          }
+        }
+
         /*
          * Lighting the ground. A single top-facing rim light made the bands
          * look like flat stripes with a highlight; what gives a cross-section
@@ -496,6 +629,14 @@
             }
           }
         }
+        // The underside of an overhang sits in its own shadow — the ink
+        // line that makes a carved roof read as a roof and not a floor.
+        var under = i + w < cells.length ? cells[i + w] : m;
+        if (under === MAT.EMPTY || under === MAT.WATER) {
+          r -= 15;
+          g -= 14;
+          b -= 12;
+        }
       }
 
       var o = i * 4;
@@ -529,6 +670,11 @@
       gd[o + 1] = lit ? gg : 0;
       gd[o + 2] = lit ? bb : 0;
       gd[o + 3] = lit ? 255 : 0;
+
+      if (++gx === w) {
+        gx = 0;
+        gy++;
+      }
     }
     bctx.putImageData(img, 0, 0);
     gctx.putImageData(glowImg, 0, 0);
