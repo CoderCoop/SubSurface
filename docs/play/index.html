@@ -117,6 +117,9 @@
       }
       .cell .v { font-size: 1rem; margin-top: 2px; }
       .cell .v.teal { color: var(--fluid); }
+      /* The dig budget is a resource, not a diagnostic — it reads in the sand
+         colour so it registers as one before it starts running out. */
+      .cell .v.sand { color: var(--sand); }
       /* A budget running out has to be visible before it has run out. */
       .cell .v.warn { color: #e0965f; }
       .track {
@@ -128,6 +131,21 @@
         overflow: hidden;
       }
       .track { height: 5px; }
+      /* The dig budget as a bar, not just a number: a resource you can see
+         draining is one you budget, one you only read when it warns is one
+         you discover when it is gone. Hidden on levels with no budget. */
+      .track.dig { height: 3px; margin-top: 6px; }
+      .track.dig[hidden] { display: none; }
+      #digbar {
+        position: absolute;
+        inset: 0 auto 0 0;
+        height: 100%;
+        width: 100%;
+        border-radius: 2px;
+        background: var(--sand);
+        transition: width 0.2s;
+      }
+      #digbar.warn { background: #e0965f; }
       #bar,
       #ceiling {
         position: absolute;
@@ -178,8 +196,27 @@
         text-transform: uppercase;
       }
       .sub b { color: var(--dim); font-weight: 400; }
+      /*
+       * Level status floats OVER the board rather than sitting in the page
+       * flow. In-flow it appeared and disappeared, and every appearance
+       * shifted the canvas — mid-drag, under your finger. As an overlay the
+       * board never moves; the toast covers a strip of sky at the top of the
+       * level, which is the one region digging never needs.
+       *
+       * pointer-events is off on the toast itself so a drag across it still
+       * digs the ground behind; only its buttons catch taps.
+       */
       .banner {
-        min-height: 22px;
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 5;
+        max-width: min(94%, 460px);
+        background: rgba(18, 15, 12, 0.92);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px 14px;
         font-size: 0.7rem;
         letter-spacing: 0.1em;
         display: flex;
@@ -188,10 +225,12 @@
         flex-wrap: wrap;
         gap: 8px;
         text-align: center;
+        pointer-events: none;
       }
       .banner:empty { display: none; }
-      .banner.win { color: var(--fluid); }
-      .banner.fail { color: #d98b6a; }
+      .banner button { pointer-events: auto; }
+      .banner.win { color: var(--fluid); border-color: rgba(47, 212, 196, 0.35); }
+      .banner.fail { color: #d98b6a; border-color: rgba(217, 139, 106, 0.35); }
       .stars { font-size: 0.95rem; letter-spacing: 0.06em; color: var(--sand); }
       .stars .dim { opacity: 0.3; }
       .hint {
@@ -680,12 +719,17 @@
             <i class="mark" style="left: 92%"></i>
             <i class="mark" style="left: 97%"></i>
           </div>
+          <!-- The dig budget, draining as you cut. Only on levels that set
+               one; a derived level with no budget shows no bar. -->
+          <div class="track dig" id="digtrack" hidden>
+            <div id="digbar"></div>
+          </div>
         </div>
       </div>
 
       <div class="stage">
         <canvas id="view" width="480" height="800"></canvas>
-
+        <div class="banner" id="banner"></div>
       </div>
 
       <div class="rail deck">
@@ -696,8 +740,6 @@
           <span>Chunks <b id="chunks">0</b></span>
           <span id="seedlabel">level 1</span>
         </div>
-
-        <div class="banner" id="banner"></div>
 
         <div class="controls">
           <button id="reset" class="primary">Restart level</button>

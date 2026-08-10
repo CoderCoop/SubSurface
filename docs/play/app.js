@@ -174,6 +174,8 @@
     chunks: document.getElementById('chunks'),
     seed: document.getElementById('seedlabel'),
     dig: document.getElementById('digleft'),
+    digtrack: document.getElementById('digtrack'),
+    digbar: document.getElementById('digbar'),
     next: document.getElementById('next'),
     intro: document.getElementById('intro')
   };
@@ -884,8 +886,22 @@
       el.time.className = 'v';
     }
     if (el.dig) {
+      var low = digBudget > 0 && dugTotal > digBudget * 0.85;
       el.dig.textContent = digBudget > 0 ? Math.max(0, digBudget - dugTotal) : '∞';
-      el.dig.className = 'v' + (digBudget > 0 && dugTotal > digBudget * 0.85 ? ' warn' : '');
+      el.dig.className = 'v' + (low ? ' warn' : digBudget > 0 ? ' sand' : '');
+    }
+    /*
+     * The budget as a bar as well as a number. A number is read when it
+     * warns; a bar draining alongside the fill bar is seen the whole level,
+     * which is what makes it a budget rather than a surprise.
+     */
+    if (el.digtrack) {
+      el.digtrack.hidden = !(digBudget > 0);
+      if (digBudget > 0) {
+        el.digbar.style.width =
+          Math.max(0, 100 * (1 - dugTotal / digBudget)) + '%';
+        el.digbar.className = dugTotal > digBudget * 0.85 ? 'warn' : '';
+      }
     }
     el.depth.textContent = s.depth.toFixed(0) + ' m';
     if (el.pressure) el.pressure.textContent = s.pressure.toFixed(0);

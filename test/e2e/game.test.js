@@ -351,6 +351,29 @@ test('Restart level resets the level in place', async () => {
   await ctx.close();
 });
 
+test('the dig budget is visible: a number and a bar that drains as you cut', async () => {
+  const { ctx, page } = await open();
+  await page.locator('#start').tap();
+  await page.waitForTimeout(300);
+
+  // Banked levels arm a budget, so from level 1 the HUD shows it two ways.
+  const left = parseInt(await text(page, '#digleft'), 10);
+  assert.ok(!isNaN(left) && left > 0, 'a budgeted level shows a number, not ∞');
+  assert.ok(await page.locator('#digtrack').isVisible(), 'and a budget bar');
+  const width = async () =>
+    (await page.locator('#digbar').boundingBox()).width;
+  const before = await width();
+
+  await digDown(page, await aimAt(page, 'crystal'), undefined, 0.6);
+  await page.waitForTimeout(400);
+  assert.ok(
+    parseInt(await text(page, '#digleft'), 10) < left,
+    'digging should spend the budget'
+  );
+  assert.ok(await width() < before, 'and visibly drain the bar');
+  await ctx.close();
+});
+
 test('the level clock runs while playing and stops at the clear time', async () => {
   const { ctx, page } = await open();
   assert.strictEqual(await text(page, '#time'), '0:00', 'the clock waits for the intro');
@@ -380,9 +403,17 @@ test('the level clock runs while playing and stops at the clear time', async () 
 test('clearing a level offers a way onward', async () => {
   const { ctx, page } = await open();
   await page.locator('#start').tap();
+  // The banner floats over the board: its appearance must not move the
+  // canvas, which in-flow it used to do — mid-drag, under your finger.
+  const before = await page.locator('#view').boundingBox();
   await solveFromMenu(page);
   assert.ok(
     await until(page, async () => (await text(page, '#banner')).includes('CLEAR'))
+  );
+  assert.deepStrictEqual(
+    await page.locator('#view').boundingBox(),
+    before,
+    'the banner appearing must not move the board'
   );
 
   const onward = page.locator('#onward');
