@@ -118,6 +118,27 @@ These are all measured, not theoretical. Each one shipped.
   nine-minute suite on a four-core box, and about five minutes of the CI job's
   ten-minute timeout. Before adding work to it, measure what it costs; the
   timeout itself lives in a file you cannot edit.
+- **The sand band and the fractured slab must not touch.** Pushing `sandAt`
+  down to make room for shelves above the band slides the band's bottom into
+  the slab; the route's crossing then exits the sand inside pre-scored rock,
+  shatters it, and plugs itself. Measured at level 25: route 0% on most
+  wide-zone samples. The sampler moves `fracAt` down with `sandAt`, and
+  `plausible()` rejects any build where `sandBot + 3 >= fracTop`.
+- **`git checkout <branch> -- <paths>` stages what it restores.** A later
+  `git add <one-file> && git commit` then quietly sweeps the staged files into
+  the commit. It cost this project a mis-scoped PR commit; use
+  `git restore --source=<branch> -- <paths>` for a worktree-only copy.
+- **The generator judges the spec exactly as it will be banked.** The bank
+  rounds every dial to five decimals on save, and the criterion lives at
+  knife edges: level 29 was accepted with its best naive drop under 85% and
+  verified back at 89.6% after the round trip. The search rounds before
+  judging (see the loop in generate-worker.js); if you add a dial, keep it
+  round-trippable.
+- **A generation run always merges over the existing bank.** There used to
+  be a `--fresh` flag that skipped the merge; one run with it and without
+  `--out` replaced the whole shipping bank with a single level. The flag is
+  gone. If a run needs a scratch bank, use `--out` — the output still
+  carries every existing entry, and the merge scripts cherry-pick.
 
 ## Levels
 
@@ -131,18 +152,25 @@ changing an existing level is fine. What is not fine is changing what a level
 *means* without re-verifying it: a banked entry carries the numbers the solver
 measured, and those numbers are a claim about terrain that has to still exist.
 
-A level is good when five things hold at once — the first three bound the
-bottom of the distribution, the last two bound the top, and the first bank
-proved that bounding only the bottom ships levels where a median of five plans
-ace and 3★ means "you found the area":
+A level is good when three things hold at once, and when its *path* is the
+difficulty:
 
 - **ace** — some plan reaches 3★ (97%). There is a line, and finding it pays.
-- **forgiving** — some plan lands in 85–92%. A near miss still gets home; a
-  level without this is a lock, not a puzzle.
-- **hard** — every naive straight drop is under 85%.
 - **crisp** — at most 2 plans ace, so the line is special.
-- **graded** — at least two plans land between 85 and 97: a ladder, not a
-  cliff.
+- **hard** — every naive straight drop and every decoy is under 85%.
+- and, gated as geometry in the generator's `plausible()`: the route must
+  **weave** (sideways travel 0.35 / 0.7 / 1.0 of the width by stage) between
+  **actually-built shelves** (1 / 2 / 3 by stage — `fitCount` silently caps a
+  request the zone cannot hold, and a level that asked for three shelves and
+  got one is a straight level wearing a complex spec).
+
+The old ladder clauses (**forgiving**: a plan in 85–92; **graded**: two plans
+in 85–97) are still recorded in every report but are gated nowhere any more.
+On woven terrain outcomes are bimodal — a plan threads every gap or dies on a
+shelf — and demanding the ladder rejected everything: measured, twelve clay
+samples under the weave gates produced not one plan between 85 and 97. The
+difficulty lives in reading the path and cutting it under the budget and the
+clock, not in a score gradient.
 
 From level 11 the sand band carries **decoy crossings** — identical clay lanes
 that lead nowhere good. The solver plays each one and `hard` requires them all

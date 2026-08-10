@@ -642,7 +642,11 @@ function profile(spec, opts = {}) {
       exact: !r.bailed
     };
     rows.push(row);
-    if (row.kind !== 'naive' && row.band === 3) aces++;
+    // Mirrors the verdict's ace counting — see there for why only these two
+    // kinds are answers. The budget has to count the same way, or a level
+    // with three same-answer variants acing gets bailed before the verdict
+    // that would have accepted it is ever computed.
+    if ((row.kind === 'route' || row.kind === 'collapse') && row.band === 3) aces++;
     return row;
   };
   const acesBlown = () => !full && aces > maxAces;
@@ -754,13 +758,30 @@ function verdict(rows, minRough, bailedBecause, baseName) {
   const decoyWins = decoys.filter((r) => r.band > 0).length;
   const rough = solved.filter((r) => r.band === 1).length;
   /*
-   * Angle threads never count as aces. A mild diagonal that stays inside the
-   * crossing is the route with a wobble — burial is a threshold, so it either
-   * IS the same cut (and aces in lockstep) or it seals and dies. Its score
-   * still lands in the histogram and can be a rung; it just cannot dilute
-   * what finding the line is worth.
+   * An ace is a distinct ANSWER, not a distinct plan. Only two kinds
+   * qualify: the route (the intended line) and a collapse (the constructive
+   * move). Everything else acing is either fatal or the same answer again:
+   *
+   *   naive/decoy  counted by `hard`, and one of them passing kills the
+   *                level anyway
+   *   angle        the route with a wobble — burial is a threshold, so it
+   *                either IS the same cut or it seals and dies
+   *   rough        the route cut by somebody with the idea but not the
+   *                precision. Every rough plan follows the route's corners
+   *                by construction, so on woven terrain — which is now the
+   *                whole bank — an acing lip or graze means the LAST LEG
+   *                forgives a hand-width, after the weave has been read and
+   *                cut in full. Measured at level 8: route, two lips, two
+   *                grazes ace together while every shift and naive dies on
+   *                a shelf. Five aces, one answer. Counting them as five
+   *                made every woven clay level uncrisp by construction.
+   *
+   * Rough scores still land in the histogram and the ladder; they just
+   * cannot dilute what finding the answer is worth.
    */
-  const aces = solved.filter((r) => r.band === 3 && r.kind !== 'angle').length;
+  const aces = solved.filter(
+    (r) => r.band === 3 && (r.kind === 'route' || r.kind === 'collapse')
+  ).length;
   // By kind rather than by name: routePlan is the only plan of kind 'route',
   // and callers that synthesise rows (the tests) name them freely.
   const routeRow = rows.find((r) => r.kind === 'route');

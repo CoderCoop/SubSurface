@@ -212,6 +212,48 @@ profile used to short-circuit with "no ace: route" before trying anything
 else, which made such levels *unfindable by construction*: the judge decided
 every bankable level would be a lane level before the search ever ran.
 
+### The path is the difficulty
+
+The owner's standing direction: difficulty should come from a complex path
+through rocks and obstacles, not from hitting a straight drop one cell more
+precisely. That is enforced as *geometry*, checked for free in
+`plausible()` before anything is simulated:
+
+- **Shelf minimums** — the zone must have actually BUILT enough shelves
+  (1 / 2 / 3 by stage): `fitCount` quietly caps the request when the zone is
+  shallow, and a level that asked for three and got one is a straight level
+  wearing a complex spec.
+- **Weave** — the route's total sideways travel must exceed 0.35 / 0.7 / 1.0
+  of the level's width by stage. One shelf measures ~0.3–0.5, two ~0.8,
+  three past 1.1, so the floor also rejects a sample whose shelves all
+  landed on one side (built but not woven).
+
+`sample()` asks for one shelf more per stage than the curve and, when asking
+for three or more, draws the seal high and the sand band low — the shelf zone
+runs from just under the seal to well above the band, and at the curve's
+default spacing it holds about two. **Strata spacing trap**: pushing the sand
+band down steals the fractured slab's room, and a crossing that exits the
+sand inside pre-scored rock shatters it and plugs itself — measured at level
+25 as route 0% on most wide-zone samples. The sampler moves the slab down
+with the band, and `plausible()` rejects any build where `sandBot + 3 >=
+fracTop`.
+
+**The criterion is one regime past the teaching levels: ace + crisp + hard.**
+The clay levels (4–10) used to additionally require the graded ladder and a
+rough pass — measurable while the terrain was open and the difficulty was
+aim. On woven terrain the outcomes are bimodal for the same reason the
+banded levels always were: a shifted line either threads every gap or dies
+on a shelf. Twelve clay samples under the weave gates produced not one plan
+between 85 and 97. The ladder clauses are still recorded in every report;
+they are no longer the bar anywhere.
+
+**Hill-climbing has two kinds of near-miss.** The original predicate climbed
+only from acing samples that failed by a countable clause. On the deep
+levels the common near-miss is the opposite — no ace, best plan at 94–96 —
+and the search never climbed from it. Measured at level 25: three 40-try
+seeds without the `best >= 94` arm found nothing; the first 21-try seed with
+it banked the level.
+
 Two facts about the fluid decide where these shapes live, both measured:
 
 - **Delivery is by overlap.** The pool at the bottom of a shaft drains
