@@ -134,9 +134,41 @@ function sample(n, rand) {
    * structural thing about a level — two levels with the same dials and a
    * different shelf count are different PLACES in a way that two levels with
    * slightly different aprons are not. The curve keeps the floor (a level in
-   * the shelf bands never loses its shelves); the search may add one.
+   * the shelf bands never loses its shelves); the search adds to it, because
+   * the difficulty is meant to live in the path: a route that weaves between
+   * three shelves is work to READ and work to CUT, where a route past one
+   * shelf is an aim adjustment. Measured against the banked levels this asks
+   * for roughly one shelf more per stage than the curve alone.
    */
-  if (base.baffles > 0) spec.baffles = base.baffles + (rand() < 0.35 ? 1 : 0);
+  if (base.baffles > 0) {
+    spec.baffles = base.baffles + (n >= 6 ? 1 : 0) + (rand() < 0.5 ? 1 : 0);
+    /*
+     * A shelf costs rows: the zone that holds them runs from just below the
+     * seal to well above the sand band, and at the curve's strata spacing it
+     * fits about two. Asking for three or more only means something if the
+     * seal is drawn high and the band low — both inside their normal ranges,
+     * so this narrows the sample toward the roomy end rather than inventing
+     * new terrain. plausible() then rejects any sample whose zone still came
+     * out too shallow to build what was asked.
+     */
+    if (spec.baffles >= 3) {
+      spec.sealAt = 0.24 + 0.03 * rand();
+      spec.sandAt = 0.5 + 0.05 * rand();
+      /*
+       * Pushing the sand band down steals the fractured band's room. On the
+       * deep levels the two are ~0.11 apart by default, the band is ~0.15
+       * of the level thick, and a sand band that runs INTO the fractured
+       * slab kills the level outright: the route's crossing exits the sand
+       * straight into rock that shatters and plugs the shaft behind it —
+       * measured at level 25 as route 0% on most wide-zone samples. So the
+       * slab moves down with the band. plausible() still checks the built
+       * rows, because this is a heuristic about fractions and that is a
+       * fact about cells.
+       */
+      if (base.fractured)
+        spec.fracAt = clamp(Math.max(spec.fracAt, spec.sandAt + 0.21), 0.66, 0.75);
+    }
+  }
   return spec;
 }
 
@@ -183,25 +215,26 @@ function accepts(n, p) {
   if (p.error) return false;
   if (n <= 3) return p.winnable && p.ace && p.naiveWins > 0;
   /*
-   * Two regimes, because two different things carry the difficulty.
+   * One regime past the teaching levels: ace + crisp + hard.
    *
-   * On clay-only levels (4–10) the score ladder is measurable and required in
-   * full: ace, crisp, a graded ladder, a rough pass, no free wins. Probed and
-   * achievable.
+   * There used to be two. Clay levels (4–10) were additionally held to the
+   * score ladder — a graded spread of plans in 85–97 and a rough pass — which
+   * was measurable there while the terrain was open and the difficulty was
+   * aim. The difficulty is not aim any more: it is the path. A route that
+   * weaves between three shelves (gated in plausible()) has bimodal outcomes
+   * for the same reason the banded levels always did — a shifted line either
+   * threads every gap or dies on a shelf — so the ladder clauses stopped
+   * being achievable exactly when the weave gates went in, and measuring
+   * twelve clay samples found what banded searching had already found: every
+   * play is an ace or a failure, nothing lands between.
    *
-   * On banded levels the outcomes are bimodal by physics — wholesale drain
-   * plus threshold burial — so demanding the 85–92 rungs there rejected
-   * everything: three seeds of searching banked five levels out of
-   * twenty-one. The difficulty of a banded level does not live in the score
-   * gradient anyway; it lives in the parts the solver cannot play: choosing
-   * between identical crossings (gated: every decoy must fail), and doing it
-   * under the budget and the clock (armed from measurements, enforced by the
-   * game). So a banded level is gated on ace + crisp + hard, and the ladder
-   * clauses are recorded rather than required.
+   * What carries the difficulty instead is the same set the banded levels
+   * use, and it is all enforced: the path has to be READ (weave + shelf
+   * minimums in plausible, decoys gated so every false lane fails), and CUT
+   * within the budget and the clock (armed from measurements). The ladder
+   * clauses are still recorded in the report; they are just not the bar.
    */
-  const banded = n >= 11;
-  if (banded) return p.ace && p.crisp && p.hard;
-  return p.fun && p.crisp && p.graded;
+  return p.ace && p.crisp && p.hard;
 }
 
 /*
@@ -232,6 +265,35 @@ function plausible(n, sim, digR) {
    * whole point of the band now is that the crossings have to be read.
    */
   if ((g.difficulty.decoys | 0) > 0 && g.decoyAt.length < 2) return 'decoys had no room';
+  /*
+   * The path has to be complex to be worth playing: the difficulty is meant
+   * to come from weaving between rock and through the sand, not from hitting
+   * a straight drop one cell more precisely. Both halves are geometry, so
+   * both are free to check:
+   *
+   *   shelves  the zone must actually have BUILT enough of them — fitCount
+   *            quietly caps the request when the zone is shallow, and a level
+   *            that asked for three and got one is a straight level wearing a
+   *            complex spec
+   *   weave    the route's total sideways travel. One shelf measures around
+   *            0.3–0.5 of the width, two around 0.8, three past 1.1 — so the
+   *            floor rises with the stage, and a sample whose shelves all
+   *            landed on one side (built but not woven) is rejected too.
+   */
+  // The sand band and the fractured slab must not touch: a crossing that
+  // exits the sand inside pre-scored rock shatters it and plugs itself.
+  if (g.difficulty.fractured && g.fracTop > 0 && g.sandBot + 3 >= g.fracTop)
+    return 'sand band runs into the fractured slab';
+  if (n >= 4) {
+    const needShelves = n >= 11 ? 3 : n >= 6 ? 2 : 1;
+    if (g.baffleY.length < needShelves)
+      return 'zone too shallow for ' + needShelves + ' shelves';
+    let weave = 0;
+    for (let q = 1; q < g.route.length; q++)
+      weave += Math.abs(g.route[q].x - g.route[q - 1].x);
+    const needWeave = (n >= 11 ? 1.0 : n >= 6 ? 0.7 : 0.35) * sim.w;
+    if (weave < needWeave) return 'route too straight to be the difficulty';
+  }
   return null;
 }
 
@@ -303,10 +365,10 @@ function search(n, seed, tries, digR, keep) {
       v.reasons.every((r) => /plans ace|ladder|passes roughly/.test(r));
     const p = profile(spec, {
       full: false,
-      // No rough-pass gate for the teaching levels (their criterion has no
-      // ladder) nor for banded levels (their ladder is not gated — see
-      // accepts). Only the clay levels short-circuit on it.
-      minRough: n <= 3 || n >= 11 ? 0 : 1,
+      // No rough-pass gate anywhere: no criterion has a ladder any more
+      // (see accepts), so bailing on a rough shortfall would reject levels
+      // their own criterion accepts.
+      minRough: 0,
       // Teaching levels are exempt from crisp, so they get no ace budget --
       // bailing early on aces would skip the naive family that their own
       // criterion depends on.
