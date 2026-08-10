@@ -17,6 +17,10 @@ jobs:
     name: Simulation rules
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # The levels matrix below gates every banked level in parallel shards,
+      # so the in-suite level gate stands down rather than paying twice.
+      SKIP_LEVELS: 1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,6 +30,27 @@ jobs:
       - run: npm ci
       - name: Rule tests
         run: npm test
+
+  levels:
+    name: Levels ${{ matrix.range }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        range: ['1 8', '9 16', '17 24', '25 31']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Play every level in the shard
+        run: npm run levels:ci -- ${{ matrix.range }} --full
+      # --full gates EVERY banked level in the range on its criterion, not a
+      # sample. Four shards on separate runners cover the whole game in about
+      # the time the old single job spent sampling six levels.
 
   e2e:
     name: Browser
