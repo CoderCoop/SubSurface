@@ -1070,7 +1070,11 @@
        */
       vents: n >= 31 ? 1 : 0,
       // A bedrock column standing on the cavern floor, splitting what lands.
-      pillar: 0
+      pillar: 0,
+      // Corestone boulders in the clay, and a dike cutting across the beds
+      // — both sampled by the generator, never dealt by the curve.
+      boulders: 0,
+      dikes: 0
     };
   }
 
@@ -1326,8 +1330,38 @@
     var baffleY = [],
       baffleGapL = [],
       baffleGapR = [];
-    var baffleThick = Math.max(2, Math.round(0.012 * h));
+    // Slabs, not lines: thick enough for the rock texture to show on the
+    // face, so a shelf reads as a ledge of bedrock rather than a ruled bar.
+    var baffleThick = Math.max(4, Math.round(0.02 * h));
+    /*
+     * Regional dip: every shelf in a level leans the same way at the same
+     * grade, the way beds in one place actually sit — tectonics tips the
+     * whole stack, not each ledge to its own taste. Seeded per level: a
+     * direction and a run (columns per row of drop). Individual shelves may
+     * additionally FAULT: past a seeded break column the bed steps down a
+     * few rows, the classic offset of a cross-section diagram. Both are
+     * expressed as one function, the shelf's vertical displacement at a
+     * column, and everything that must clear a shelf asks the same
+     * function for its worst case.
+     */
+    var DIP_DIR = D.pick(90) < 0.5 ? -1 : 1;
+    var DIP_RUN = 8 + Math.round(D.pick(91) * 6); // 8..14 columns per row
+    var shelfDy = function (x, faultX, faultStep) {
+      var dy = Math.round(((x - w / 2) / DIP_RUN) * DIP_DIR);
+      if (faultX > 0 && x > faultX) dy += faultStep;
+      return dy;
+    };
+    var shelfDyRange = function (x0, x1, faultX, faultStep) {
+      var lo = 0, hi = 0;
+      for (var xx = x0; xx < x1; xx++) {
+        var d = shelfDy(xx, faultX, faultStep);
+        if (d < lo) lo = d;
+        if (d > hi) hi = d;
+      }
+      return [lo, hi];
+    };
     var baffleShelf = [];
+    var baffleFault = [];
     var bandTop = sandTop,
       bandBot = sandTop + Math.round(D.sandDepth * h);
     /*
@@ -1473,6 +1507,16 @@
         baffleGapL.push(openL);
         baffleGapR.push(openR);
         baffleShelf.push([shelfL, shelfR]);
+        // Roughly half the shelves carry a fault: a break at a seeded
+        // column past which the bed steps down 2-4 rows.
+        if (D.pick(95 + bI) < 0.5) {
+          var fx = Math.round(
+            shelfL + (0.3 + 0.4 * D.pick(97 + bI)) * (shelfR - shelfL)
+          );
+          baffleFault.push([fx, 2 + Math.round(D.pick(99 + bI) * 2)]);
+        } else {
+          baffleFault.push([0, 0]);
+        }
       }
     }
 
@@ -1497,8 +1541,25 @@
        * is simply interrupted and the payload never leaves the reservoir. A
        * shelf is something to be beside, not something to pass through.
        */
-      lane.push({ y: baffleY[q] - 2, x: wpx });
-      lane.push({ y: baffleY[q] + baffleThick + 2, x: wpx });
+      /*
+       * Clear the shelf where the route PASSES it — the columns beside its
+       * gap — not its whole span. The span's worst case (regional dip over
+       * forty columns) put waypoint pairs of adjacent shelves past each
+       * other vertically; the y-sort below then interleaved them, and the
+       * lane's diagonals cut straight through shelf bodies. Measured at
+       * level 23: dead routes with no dike and no pillar to blame.
+       */
+      var nearGap =
+        q < baffleShelf.length
+          ? baffleShelf[q][0] === WALL
+            ? [Math.max(baffleShelf[q][0], baffleShelf[q][1] - 7), baffleShelf[q][1]]
+            : [baffleShelf[q][0], Math.min(baffleShelf[q][1], baffleShelf[q][0] + 7)]
+          : null;
+      var dyR = nearGap
+        ? shelfDyRange(nearGap[0], nearGap[1], baffleFault[q][0], baffleFault[q][1])
+        : [0, 0];
+      lane.push({ y: baffleY[q] + dyR[0] - 2, x: wpx });
+      lane.push({ y: baffleY[q] + dyR[1] + baffleThick + 2, x: wpx });
     }
     /*
      * Below the last shelf the lane comes back under it to the basin, which
@@ -1551,9 +1612,26 @@
     // The shelves themselves, laid before sand and rock so neither can be
     // spread over one and breach it; both skip bedrock in turn.
     for (var bJ = 0; bJ < baffleShelf.length; bJ++)
-      for (y = baffleY[bJ]; y < baffleY[bJ] + baffleThick; y++)
-        for (x = baffleShelf[bJ][0]; x < baffleShelf[bJ][1]; x++)
-          sim.set(x, y, BEDROCK);
+      for (x = baffleShelf[bJ][0]; x < baffleShelf[bJ][1]; x++) {
+        /*
+         * The open end tapers from the underside: the tip loses a row per
+         * column over its last three, so the slab ends in a wedge the way a
+         * ledge of rock does. The TOP stays flat the whole way — it is the
+         * surface fluid runs along and the line the player plans against.
+         */
+        var fromTip =
+          baffleShelf[bJ][0] === WALL
+            ? baffleShelf[bJ][1] - 1 - x
+            : x - baffleShelf[bJ][0];
+        var wedge = fromTip < 3 ? 3 - fromTip : 0;
+        var dipHere = shelfDy(x, baffleFault[bJ][0], baffleFault[bJ][1]);
+        for (
+          y = baffleY[bJ] + dipHere;
+          y < baffleY[bJ] + dipHere + baffleThick - wedge;
+          y++
+        )
+          if (y > sealTop && y < h - 2) sim.set(x, y, BEDROCK);
+      }
 
     /*
      * Hot rock at the lip of a shelf (spec §5, stage 31+).
@@ -1587,9 +1665,95 @@
       var v0 = shelfFromLeft ? Math.max(sh[0], sh[1] - ventLen) : sh[0],
         v1 = shelfFromLeft ? sh[1] : Math.min(sh[1], sh[0] + ventLen);
       ventAt.push([v0, v1, baffleY[vI]]);
-      for (y = baffleY[vI]; y < baffleY[vI] + baffleThick; y++)
+      // Convert the rock that is actually there: the tip is a wedge now
+      // and the slab tilts, so scan the full dropped range and let the
+      // bedrock check find the actual cells.
+      var vR = shelfDyRange(sh[0], sh[1], baffleFault[vI][0], baffleFault[vI][1]);
+      for (
+        y = baffleY[vI] + vR[0];
+        y < baffleY[vI] + vR[1] + baffleThick;
+        y++
+      )
         for (x = v0; x < v1; x++)
-          if (x >= WALL && x < w - WALL) sim.set(x, y, VENT);
+          if (x >= WALL && x < w - WALL && sim.get(x, y) === BEDROCK)
+            sim.set(x, y, VENT);
+    }
+
+    /*
+     * Corestone boulders: rounded blobs of bedrock floating in the clay,
+     * the way a weathering front leaves them. Uncuttable — literal rocks
+     * in the way of whatever line the player had in mind — and kept off
+     * the lane so the intended route never meets one. Seeded ellipses,
+     * slightly wider than tall, which is how they actually sit.
+     */
+    var boulders = [];
+    var wantBoulders = D.boulders | 0;
+    for (var bo = 0; bo < wantBoulders; bo++) {
+      var bx = col(0.12 + 0.76 * D.pick(120 + bo));
+      var byy = Math.round(
+        sealTop + 6 + (bandTop - 14 - sealTop) * D.pick(130 + bo)
+      );
+      var br = 2 + Math.round(D.pick(140 + bo) * 2); // radius 2..4
+      /*
+       * Not on the lane: the route is a promise. Checked against EVERY row
+       * the boulder spans, not just its centre — the lane bends at each
+       * shelf, and a boulder whose centre row cleared the lane was landing
+       * on the bent lane a few rows up, an uncuttable blob in the intended
+       * dig. Measured at level 13: two of five samples had route 0%.
+       */
+      var onLane = false;
+      for (var byr = byy - br; byr <= byy + br && !onLane; byr++) {
+        var lx2 = laneX[Math.max(0, Math.min(h - 1, byr))];
+        if (Math.abs(bx - lx2) < halfW + br + 2) onLane = true;
+      }
+      if (onLane) continue;
+      for (y = byy - br; y <= byy + br; y++)
+        for (x = bx - br - 1; x <= bx + br + 1; x++) {
+          if (x <= WALL || x >= w - WALL - 1 || y <= sealTop || y >= h - 2)
+            continue;
+          var ddx = (x - bx) / (br + 1.2),
+            ddy = (y - byy) / br;
+          if (ddx * ddx + ddy * ddy <= 1) sim.set(x, y, BEDROCK);
+        }
+      boulders.push([bx, byy, br]);
+    }
+
+    /*
+     * A dike: a steep sheet of rock cutting across the beds, the boldest
+     * stroke in any real section. Two to three cells wide, descending at
+     * a seeded grade, WINDOWED where it meets the lane — a dike the route
+     * cannot pass would not be terrain, it would be a wall with a level
+     * attached. Fluid it deflects runs along its upper face, which is a
+     * new kind of hazard and the reason the generator gets to sample it
+     * rather than every level getting one.
+     */
+    var dikeAt = null;
+    if (D.dikes) {
+      var dTopX = col(0.2 + 0.6 * D.pick(150));
+      var dDir = D.pick(151) < 0.5 ? -1 : 1;
+      var dRun = 3 + Math.round(D.pick(152) * 2); // columns per row of descent
+      var dW = 2 + Math.round(D.pick(153));
+      /*
+       * The dike ends ABOVE the sand band — an unconformity, which is how
+       * real dikes get truncated all the time. Let it run through the band
+       * and it kills the level: a bedrock sheet inside the sand funnels the
+       * slump straight into the crossing and buries it (measured at level
+       * 23: every sample with a dike through the band had route 0-31%,
+       * every sample without one aced), and it eats the room the decoy
+       * crossings need. Above the band is also where a dike READS — cutting
+       * across the shelves it postdates.
+       */
+      var dY0 = sealTop + 4,
+        dY1 = Math.min(cavernTop - 2, bandTop - 3);
+      for (y = dY0; y < dY1; y++) {
+        var dCx = dTopX + dDir * Math.round((y - dY0) / dRun);
+        if (Math.abs(dCx - laneX[y]) < halfW + 2) continue; // the window
+        for (x = dCx; x < dCx + dW; x++) {
+          if (x <= WALL || x >= w - WALL - 1) continue;
+          sim.set(x, y, BEDROCK);
+        }
+      }
+      dikeAt = { x0: dTopX, dir: dDir, w: dW };
     }
 
     var hasSand = opts.sand !== false && D.sand;
@@ -1816,9 +1980,14 @@
         }
     }
 
-    // Open cavern beneath the clay.
-    for (y = cavernTop; y < floorY; y++)
-      for (x = WALL; x < w - WALL; x++) sim.set(x, y, EMPTY);
+    // Open cavern beneath the clay. The roofline undulates — up to three
+    // rows of clay hang below the nominal cavernTop, so the roof reads as a
+    // carved vault rather than a ruled ceiling. Clay, so a route that wants
+    // through simply digs it: scenery can never wall anything off.
+    for (x = WALL; x < w - WALL; x++) {
+      var roofSag = Math.round(shapeNoise(x, 71, 8) * 5);
+      for (y = cavernTop + roofSag; y < floorY; y++) sim.set(x, y, EMPTY);
+    }
 
     /*
      * The basin sits under the corridor, so the route always ends somewhere.
@@ -1864,7 +2033,7 @@
         // beside the crown and act as a dam the level never asked for.
         return (
           outerFloor -
-          Math.round(shapeNoise(px, 9, 9) * 2.4 * Math.min(1, (off - apron) / 6))
+          Math.round(shapeNoise(px, 9, 14) * 4.8 * Math.min(1, (off - apron) / 8))
         );
       if (!slope) return floorY;
       return floorY + Math.round(slope * Math.min(1, off / Math.max(1, apron)));
@@ -1906,10 +2075,20 @@
      * the strata, or the band carving would overwrite them with sand.
      */
     for (y = sealTop; y < h - 2; y++) {
-      if (sim.get(WALL, y) !== DRAIN && shapeNoise(y, 31, 5) > 0.72)
+      var nL = shapeNoise(y, 31, 5),
+        nR = shapeNoise(y, 37, 5);
+      if (sim.get(WALL, y) !== DRAIN && nL > 0.72) {
         sim.set(WALL, y, BEDROCK);
-      if (sim.get(w - WALL - 1, y) !== DRAIN && shapeNoise(y, 37, 5) > 0.72)
+        // The hardest crests jut two cells, so the wall's profile has
+        // fingers as well as ripples.
+        if (nL > 0.88 && sim.get(WALL + 1, y) !== DRAIN)
+          sim.set(WALL + 1, y, BEDROCK);
+      }
+      if (sim.get(w - WALL - 1, y) !== DRAIN && nR > 0.72) {
         sim.set(w - WALL - 1, y, BEDROCK);
+        if (nR > 0.88 && sim.get(w - WALL - 2, y) !== DRAIN)
+          sim.set(w - WALL - 2, y, BEDROCK);
+      }
     }
 
     /*
