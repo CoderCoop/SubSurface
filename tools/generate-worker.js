@@ -131,8 +131,23 @@ function sample(n, rand) {
    */
   spec.sandDepth = clamp(base.sandDepth + (rand() - 0.5) * 0.06, 0.12, 0.2);
   if (base.fractured)
-    spec.fracDepth = clamp(base.fracDepth + (rand() - 0.5) * 0.05, 0.07, 0.13);
+    /*
+     * Downward-biased: a thicker pre-scored slab sheds more chunks into the
+     * shaft that just cut it, and on the deep levels' narrow corridors the
+     * plug rate climbs fast — 27 and 30 burned three seed rounds mostly on
+     * routes wedged shut under slabs drawn above ~0.11.
+     */
+    spec.fracDepth = clamp(base.fracDepth + (rand() - 0.5) * 0.04, 0.07, 0.11);
   spec.pillar = n >= 18 && rand() < 0.35 ? 0.35 + 0.4 * rand() : 0;
+  /*
+   * The geology set, from the owner's picks (2026-08-11, mockups reviewed):
+   * corestone boulders on most levels past the teaching ramp, a dike on
+   * about half the levels from stage 8 — landmarks, windowed at the lane so
+   * neither can ever wall off the answer. Dip and faults are unconditional
+   * in the builder and need no dial.
+   */
+  spec.boulders = n >= 5 ? 1 + Math.floor(rand() * 3) : 0;
+  spec.dikes = n >= 8 && rand() < 0.5 ? 1 : 0;
   /*
    * Heat vents from the band that teaches them, and never before it — like
    * sand and fractured rock, this is progression rather than shape. How MANY

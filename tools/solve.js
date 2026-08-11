@@ -696,7 +696,21 @@ function profile(spec, opts = {}) {
         baseName = p.name;
       }
     }
-    if (!full && !pre) return verdict(rows, minRough, 'no ace: route ' + route.pct.toFixed(1));
+    /*
+     * Dead only if NOTHING aced. The rescue can produce aces that do not
+     * qualify as `pre` — a route in [92, 97) with a collapse at 97 is a
+     * lane level with a redundant flourish, not a dam level — and this
+     * return used to fire anyway. The verdict it returned carried the
+     * collapse aces (so `ace` and `crisp` passed) while the decoys and the
+     * naive drops had never been played (so `hard` passed VACUOUSLY), and
+     * the generator accepted level 26 off what was written as a rejection.
+     * The full verify then ran everything, found the all-pockets collapse
+     * acing too, and failed the level it had never really accepted. A spec
+     * with unqualified aces continues as a lane level and pays for the
+     * whole set.
+     */
+    if (!full && !pre && aces === 0)
+      return verdict(rows, minRough, 'no ace: route ' + route.pct.toFixed(1));
   }
 
   // 3. Does a near miss still get home? Asked of the answer that aces — the

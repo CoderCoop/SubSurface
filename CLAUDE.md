@@ -134,6 +134,21 @@ These are all measured, not theoretical. Each one shipped.
   verified back at 89.6% after the round trip. The search rounds before
   judging (see the loop in generate-worker.js); if you add a dial, keep it
   round-trippable.
+- **A dike must stop above the sand band.** A bedrock sheet inside the band
+  funnels the slump straight into the crossing and buries it — measured at
+  level 23 as route 0% on every diked sample — and it eats the room the
+  decoys need. Truncate at an unconformity above the band, which is also
+  where a dike reads.
+- **Clear a shelf where the route passes it, not over its whole span.** With
+  regional dip the span's worst case is ±8 rows; waypoint pairs of adjacent
+  shelves then interleave, the lane's y-sort scribbles, and its diagonals
+  cut through shelf bodies. Measured at level 23: dead routes with nothing
+  else to blame. The clearance window is the few columns beside the gap.
+- **A thick fractured slab plugs deep routes.** Chunk shed scales with slab
+  depth, and on the deep levels' narrow corridors the wedge rate climbs
+  fast: levels 27 and 30 burned three seed rounds mostly on wedged routes
+  until fracDepth sampling was capped at 0.11 — after which 27 banked on
+  its first sample.
 - **A generation run always merges over the existing bank.** There used to
   be a `--fresh` flag that skipped the merge; one run with it and without
   `--out` replaced the whole shipping bank with a single level. The flag is
@@ -147,10 +162,17 @@ The game has two sources of levels and they meet at one builder: the curve
 it has an entry.** Both go through `tools/bank.js#specFor(n)`, so there is one
 answer to "what is level 7".
 
-Levels may be **regenerated freely** — the game is in early development and
-changing an existing level is fine. What is not fine is changing what a level
-*means* without re-verifying it: a banked entry carries the numbers the solver
-measured, and those numbers are a claim about terrain that has to still exist.
+Levels may be regenerated — the game is in early development and changing an
+existing level is fine — but **review the options with the owner before
+kicking off a regeneration** (standing instruction, 2026-08-11): which levels,
+what changed in the builder or the gates, and what the dials are — and for
+anything visual, **screenshot mockups of each option**, not descriptions. A
+regen replaces the levels people are playing, and the choices inside one
+(thickness, floors, thresholds) are design decisions, not implementation
+details. What is
+also not fine is changing what a level *means* without re-verifying it: a
+banked entry carries the numbers the solver measured, and those numbers are a
+claim about terrain that has to still exist.
 
 A level is good when three things hold at once, and when its *path* is the
 difficulty:
